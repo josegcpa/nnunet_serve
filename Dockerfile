@@ -1,11 +1,12 @@
 FROM python:3.11.4-slim-bullseye
 USER root
-WORKDIR /nnunet_pred_folder
+WORKDIR /app
 
 # install environment
-RUN pip install pip setuptools wheel
-COPY requirements.txt ./
-RUN pip install -r requirements.txt
+COPY ../requirements.txt requirements.txt
+COPY ../docker-installations.sh docker-installations.sh
+RUN bash docker-installations.sh
+
 # create accessory directories
 RUN mkdir /model && \
     mkdir -p /data && \
@@ -13,6 +14,10 @@ RUN mkdir /model && \
     mkdir -p /data/output && \
     mkdir -p utils
 
-COPY utils/utils.py utils/entrypoint.py utils/pydicom_seg_writers.py utils/
+# copy scripts
+COPY ../utils/utils.py utils/
+COPY ../utils/pydicom_seg_writers.py utils/
+COPY ../utils/entrypoint-prod.py utils/
+COPY ../utils/entrypoint.py utils/
 RUN chown root -R utils
-ENTRYPOINT ["python", "utils/entrypoint.py","-o /data/output","-m /model"]
+ENTRYPOINT ["python", "utils/entrypoint-prod.py","-o /data/output","-m /model"]
