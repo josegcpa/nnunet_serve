@@ -211,6 +211,8 @@ if __name__ == "__main__":
         if os.path.exists(args.log_file):
             with open(args.log_file, "r") as f:
                 log_out = json.load(f)
+            if "job_id" not in log_out:
+                log_out["job_id"] = args.job_id
             for k in ["status", "output_log", "output_error"]:
                 log_out[k] = data[k]
         else:
