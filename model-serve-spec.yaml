@@ -1,7 +1,9 @@
 ---
-model_folder: /home/jose_almeida/nnunet_docker/models
+model_folder: /usr/backups/models/nnunet/
+load_timeout_min: 60
 models:
-  prostate_whole_gland_model:
+  - id: prostate_whole_gland
+    rel_path: prostate_whole_gland_model
     name: "Prostate whole gland segmentation"
     # file containing metadata for DICOM-seg output
     aliases: [prostate]
@@ -17,7 +19,8 @@ models:
       tta: true
       save_proba_map: true
       checkpoint_name: "checkpoint_best.pth"
-  prostate_zone_model:
+  - id: prostate_zone
+    rel_path: prostate_zone_model
     name: "Prostate zone segmentation model"
     aliases: [prostate_zones]
     metadata: metadata_templates/prostate-zones.json
@@ -30,7 +33,8 @@ models:
       tta: true
       save_proba_map: true
       checkpoint_name: "checkpoint_best.pth"
-  prostate_aggressive_lesion_model:
+  - id: prostate_aggressive_lesion
+    rel_path: prostate_aggressive_lesion_model
     name: "Prostate aggressive lesion detection model"
     aliases: [aggressive_lesion]
     metadata: metadata_templates/prostate-aggressive-lesion.json
@@ -45,3 +49,32 @@ models:
       save_proba_map: true
       checkpoint_name: "checkpoint_best.pth"
       class_idx: 1 # required to save probability maps
+  - id: whole_body_ct
+    rel_path: Dataset300_body_6mm_1559subj
+    name: "Whole body CT segmentation model (from TotalSegmentator)"
+    aliases: [body_ct]
+    metadata: null
+    min_mem: 4000
+    default_args:
+      series_folders: ["inputs/seriesCT"]
+      use_folds: [0]
+      checkpoint_name: "checkpoint_final.pth"
+  - id: organ_ct
+    rel_path: Dataset291_TotalSegmentator_part1_organs_1559subj
+    name: "Organ CT segmentation model (from TotalSegmentator)"
+    metadata: null
+    min_mem: 4000
+    default_args:
+      series_folders: ["inputs/seriesCT"]
+      use_folds: [0]
+      checkpoint_name: "checkpoint_final.pth"
+  - id: hcc_arterial
+    rel_path: hcc_arterial
+    name: "HCC arterial phase segmentation model"
+    metadata: metadata_templates/hcc.json
+    min_mem: 4000
+    default_args:
+      series_folders: ["inputs/seriesCT"]
+      use_folds: [0]
+      checkpoint_name: "checkpoint_final.pth"
+    
