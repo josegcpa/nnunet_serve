@@ -40,7 +40,7 @@ if __name__ == "__main__":
         new_params[k] = v
 
     for i, ckpt_path in enumerate(args.checkpoints):
-        ckpt = torch.load(ckpt_path)
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         for k in new_params:
             cmd = (
                 "ckpt"
