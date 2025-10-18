@@ -1,8 +1,12 @@
 import os
 import subprocess as sp
 import json
+import numpy as np
 import SimpleITK as sitk
 import torch
+from copy import deepcopy
+from typing import Union
+
 from glob import glob
 from pydantic import BaseModel, ConfigDict, Field
 from .utils import (
@@ -11,11 +15,32 @@ from .utils import (
     read_dicom_as_sitk,
     export_to_dicom_seg,
     export_to_dicom_struct,
-    export_proba_map_and_mask,
+    extract_lesion_candidates,
+    copy_information_nd,
+    intersect,
     export_fractional_dicom_seg,
 )
+from batchgenerators.dataloading.multi_threaded_augmenter import (
+    MultiThreadedAugmenter,
+)
+from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
+from nnunetv2.configuration import default_num_processes
+from nnunetv2.utilities.label_handling.label_handling import LabelManager
+from nnunetv2.utilities.plans_handling.plans_handler import (
+    PlansManager,
+    ConfigurationManager,
+)
+from nnunetv2.utilities.helpers import empty_cache
+from nnunetv2.inference.export_prediction import (
+    convert_predicted_logits_to_segmentation_with_correct_shape,
+)
+from nnunetv2.inference.sliding_window_prediction import compute_gaussian
+
+
+from .logging_utils import get_logger
 from typing import Any
 
+logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
 FAILURE_STATUS = "failed"
 
@@ -51,7 +76,7 @@ class InferenceRequest(BaseModel):
         default=1,
     )
     checkpoint_name: str = Field(
-        description="nnUNet checkpoint name", default="checkpoint_best.pth"
+        description="nnUNet checkpoint name", default=None
     )
     tmp_dir: str = Field(
         description="Directory for temporary outputs", default=".tmp"
@@ -67,10 +92,10 @@ class InferenceRequest(BaseModel):
     use_folds: Folds = Field(
         description="Which folds should be used", default_factory=lambda: [0]
     )
-    proba_threshold: float | list[float] = Field(
-        description="Probability threshold for model output", default=0.1
+    proba_threshold: float | list[float | None] | None = Field(
+        description="Probability threshold for model output", default=None
     )
-    min_confidence: float | list[float] | None = Field(
+    min_confidence: float | list[float | None] | None = Field(
         description="Minimum confidence for model output", default=None
     )
     intersect_with: str | None = Field(
@@ -80,6 +105,19 @@ class InferenceRequest(BaseModel):
     )
     min_overlap: float = Field(
         description="Minimum overlap for intersection", default=0.1
+    )
+    crop_from: str | None = Field(
+        description="Crops input to the bounding box of this model. ",
+        default=None,
+    )
+    crop_padding: tuple[int, int, int] | None = Field(
+        description="Padding to be added to the cropped region", default=None
+    )
+    cascade_mode: str | None = Field(
+        description="Whether to crop inputs to consecutive bounding boxes "
+        "or to intersect consecutive outputs.",
+        default="intersect",
+        choices=["intersect", "crop", None],
     )
     save_proba_map: bool = Field(
         description="Saves the probability map", default=False
@@ -94,6 +132,150 @@ class InferenceRequest(BaseModel):
     suffix: str | None = Field(
         description="Suffix for predictions", default=None
     )
+
+
+def convert_predicted_logits_to_segmentation_with_correct_shape(
+    predicted_logits: Union[torch.Tensor, np.ndarray],
+    plans_manager: PlansManager,
+    configuration_manager: ConfigurationManager,
+    label_manager: LabelManager,
+    properties_dict: dict,
+    return_probabilities: bool = False,
+    num_threads_torch: int = default_num_processes,
+):
+    old_threads = torch.get_num_threads()
+    torch.set_num_threads(num_threads_torch)
+
+    # resample to original shape
+    current_spacing = (
+        configuration_manager.spacing
+        if len(configuration_manager.spacing)
+        == len(properties_dict["shape_after_cropping_and_before_resampling"])
+        else [properties_dict["spacing"][0], *configuration_manager.spacing]
+    )
+
+    predicted_logits = configuration_manager.resampling_fn_probabilities(
+        predicted_logits,
+        properties_dict["shape_after_cropping_and_before_resampling"],
+        current_spacing,
+        properties_dict["spacing"],
+    )
+
+    # return value of resampling_fn_probabilities can be ndarray or Tensor but that does not matter because
+    # apply_inference_nonlin will convert to torch
+    predicted_probabilities = label_manager.apply_inference_nonlin(
+        predicted_logits
+    )
+    del predicted_logits
+    segmentation = label_manager.convert_probabilities_to_segmentation(
+        predicted_probabilities
+    )
+
+    # segmentation may be torch.Tensor but we continue with numpy
+    if isinstance(segmentation, torch.Tensor):
+        segmentation = segmentation.cpu().numpy()
+
+    # put segmentation in bbox (revert cropping)
+    segmentation_reverted_cropping = np.zeros(
+        properties_dict["shape_before_cropping"],
+        dtype=(
+            np.uint8
+            if len(label_manager.foreground_labels) < 255
+            else np.uint16
+        ),
+    )
+    slicer = bounding_box_to_slice(properties_dict["bbox_used_for_cropping"])
+    segmentation_reverted_cropping[slicer] = segmentation
+    del segmentation
+    # revert transpose
+    segmentation_reverted_cropping = segmentation_reverted_cropping.transpose(
+        plans_manager.transpose_backward
+    )
+    if return_probabilities:
+        # revert cropping
+        predicted_probabilities = (
+            label_manager.revert_cropping_on_probabilities(
+                predicted_probabilities,
+                properties_dict["bbox_used_for_cropping"],
+                properties_dict["shape_before_cropping"],
+            )
+        )
+        predicted_probabilities = predicted_probabilities.cpu().numpy()
+        # revert transpose
+        predicted_probabilities = predicted_probabilities.transpose(
+            [0] + [i + 1 for i in plans_manager.transpose_backward]
+        )
+        torch.set_num_threads(old_threads)
+        return segmentation_reverted_cropping, predicted_probabilities
+    else:
+        torch.set_num_threads(old_threads)
+        return segmentation_reverted_cropping
+
+
+def predict_from_data_iterator_local(
+    predictor: nnUNetPredictor,
+    data_iterator: list[dict[str, Any]],
+    save_probabilities: bool = False,
+    class_idx: int | list[int] | None = None,
+):
+    """
+    Adapts the original predict_from_data_iterator to use no multiprocessing.
+    """
+    ret = []
+    for preprocessed in data_iterator:
+        data = preprocessed["data"]
+        if isinstance(data, str):
+            delfile = data
+            data = torch.from_numpy(np.load(data))
+            os.remove(delfile)
+
+        properties = preprocessed["data_properties"]
+
+        prediction = predictor.predict_logits_from_preprocessed_data(data).cpu()
+        logger.info("nnUNet: predicted logits")
+        if class_idx is not None:
+            old_labels = predictor.label_manager._all_labels
+            old_regions = predictor.label_manager._regions
+            if isinstance(class_idx, int):
+                class_idx = [class_idx]
+            used_labels = [0, *class_idx]
+            prediction = prediction[[0, *class_idx]]
+            if predictor.label_manager._has_regions:
+                new_regions = [
+                    r
+                    for r in predictor.label_manager._regions
+                    if any([rr in used_labels for rr in r])
+                ]
+                used_labels = (
+                    np.unique(np.concatenate(new_regions)).sort().tolist()
+                )
+            predictor.label_manager._all_labels = used_labels
+
+        logger.info("nnUNet: resampling...")
+        processed_output = (
+            convert_predicted_logits_to_segmentation_with_correct_shape(
+                prediction,
+                predictor.plans_manager,
+                predictor.configuration_manager,
+                predictor.label_manager,
+                properties,
+                save_probabilities,
+            )
+        )
+        logger.info("nnUNet: converted logits to segmentation")
+        ret.append(processed_output)
+        logger.info(f"\nDone with image of shape {data.shape}:")
+        predictor.label_manager._all_labels = old_labels
+        predictor.label_manager._regions = old_regions
+
+    if isinstance(data_iterator, MultiThreadedAugmenter):
+        data_iterator._finish()
+
+    # clear lru cache
+    compute_gaussian.cache_clear()
+    # clear device cache
+    empty_cache(predictor.device)
+    return ret
 
 
 def get_gpu_memory() -> list[int]:
@@ -265,7 +447,10 @@ def predict(
         "proba_threshold",
         "min_confidence",
         "intersect_with",
+        "crop_from",
+        "crop_padding",
         "min_overlap",
+        "cascade_mode",
     ]
     export_param_names = [
         "output_dir",
@@ -290,20 +475,18 @@ def predict(
     }
     export_params = {k: params[k] for k in params if k in export_param_names}
 
-    sitk_files, mask_path, good_file_paths, proba_map = multi_model_inference(
+    all_predictions, all_proba_maps, good_file_paths = multi_model_inference(
         series_paths=series_paths,
         predictor=predictor,
         nnunet_path=nnunet_path,
-        metadata_path=metadata_path,
         **inference_params,
     )
 
     output_paths = export_predictions(
-        mask_path=mask_path,
-        sitk_files=sitk_files,
-        proba_map=proba_map,
-        good_file_paths=good_file_paths,
-        metadata_path=metadata_path,
+        all_predictions,
+        all_proba_maps,
+        good_file_paths,
+        metadata_path,
         **export_params,
     )
 
@@ -312,19 +495,251 @@ def predict(
     return output_paths
 
 
+def get_crop(
+    image: str | sitk.Image,
+    target_image: sitk.Image | None = None,
+    crop_padding: tuple[int, int, int] | None = None,
+    min_size: tuple[int, int, int] | None = None,
+) -> tuple[int, int, int, int, int, int]:
+    """
+    Retrieves the bounding box of a label in an image.
+
+    Args:
+        image (str | sitk.Image): input image.
+        target_image (sitk.Image | None, optional): target image. Defaults to None.
+        crop_padding (tuple[int, int, int] | None, optional): padding to be added to the cropped region. Defaults to None.
+        min_size (tuple[int, int, int] | None, optional): minimum size of the cropped region. Defaults to None.
+
+    Returns:
+        tuple[int, int, int, int, int, int]: bounding box of the label.
+    """
+    class_idx = 1
+    if isinstance(image, str):
+        if ":" in image:
+            image, class_idx = image.split(":")
+            class_idx = int(class_idx)
+        image = sitk.ReadImage(image)
+    if target_image is not None:
+        # check if resampling is required
+        if any(
+            [
+                image.GetSpacing() != target_image.GetSpacing(),
+                image.GetOrigin() != target_image.GetOrigin(),
+                image.GetDirection() != target_image.GetDirection(),
+            ]
+        ):
+            image = resample_image_to_target(
+                image, target=target_image, is_label=True
+            )
+    target_image_size = target_image.GetSize()
+    image = image == class_idx
+    labelimfilter = sitk.LabelShapeStatisticsImageFilter()
+    labelimfilter.Execute(image)
+    bounding_box = labelimfilter.GetBoundingBox(class_idx)
+    start, size = bounding_box[:3], bounding_box[3:]
+    if crop_padding is not None:
+        for i in range(3):
+            start[i] = max(start[i] - crop_padding[i], 0)
+            size[i] = min(size[i] + crop_padding[i], target_image_size[i])
+    if min_size is not None:
+        for i in range(3):
+            if size[i] < min_size[i]:
+                new_start = max(
+                    bounding_box[i] - (min_size[i] - size[i]) // 2, 0
+                )
+                start[i] = new_start
+                size[i] = min_size[i]
+
+    bounding_box = [
+        start[0],
+        start[1],
+        start[2],
+        start[0] + size[0],
+        start[1] + size[1],
+        start[2] + size[2],
+    ]
+    output_padding = [
+        bounding_box[0],
+        bounding_box[1],
+        bounding_box[2],
+        target_image_size[0] - bounding_box[3],
+        target_image_size[1] - bounding_box[4],
+        target_image_size[2] - bounding_box[5],
+    ]
+    return bounding_box, output_padding
+
+
+def load_series(series_paths: list[list[str]], is_dicom: bool = False):
+    unique_series_paths = []
+    for series_path in series_paths:
+        for s in series_path:
+            if s not in unique_series_paths:
+                unique_series_paths.append(s)
+    unique_volumes = {}
+    all_good_file_paths = {}
+    for s in unique_series_paths:
+        if is_dicom:
+            unique_volumes[s], all_good_file_paths[s] = read_dicom_as_sitk(
+                glob(f"{s}/*dcm")
+            )
+        else:
+            unique_volumes[s] = sitk.ReadImage(s)
+    logger.info("Loaded %d unique volumes", len(unique_volumes))
+    all_volumes = []
+    for i, series_path in enumerate(series_paths):
+        if len(series_path) > 1:
+            # resample to first using unique_volumes
+            curr_volumes = [unique_volumes[s]] + [
+                resample_image_to_target(
+                    unique_volumes[s], unique_volumes[series_path[0]]
+                )
+                for s in series_path[1:]
+            ]
+        else:
+            curr_volumes = [unique_volumes[series_path[0]]]
+        all_volumes.append(curr_volumes)
+    return all_volumes, all_good_file_paths
+
+
+def process_proba_array(
+    proba_array: np.ndarray,
+    input_image: sitk.Image,
+    proba_threshold: float = 0.1,
+    min_confidence: float = 0.5,
+    intersect_with: str | sitk.Image | None = None,
+    min_intersection: float = 0.1,
+    class_idx: int | list[int] | None = None,
+    output_padding: list[int] | None = None,
+) -> sitk.Image:
+    """
+    Exports a SITK probability mask and the corresponding prediction. Applies a
+    candidate extraction protocol (i.e. filtering probabilities above
+    proba_threshold, applying connected component analysis and filtering out
+    objects whose maximum probability is lower than min_confidence).
+
+    Args:
+        array (np.ndarray): an array corresponding to a probability map.
+        proba_threshold (float, optional): sets values below this value to 0.
+        min_confidence (float, optional): removes objects whose maximum
+            probability is lower than this value.
+        intersect_with (str | sitk.Image, optional): calculates the
+            intersection of each candidate with the image specified in
+            intersect_with. If the intersection is larger than
+            min_intersection, the candidate is kept; otherwise it is discarded.
+            Defaults to None.
+        min_intersection (float, optional): minimum intersection over the union
+            to keep candidate. Defaults to 0.1.
+        class_idx (int | list[int] | None, optional): class index for output
+            probability. Defaults to None (no selection).
+        output_padding (list[int] | None, optional): padding to apply to the
+            output mask. Defaults to None.
+
+    Returns:
+        sitk.Image: returns the probability mask after the candidate extraction
+            protocol.
+    """
+    logger.info("Exporting probability map and mask")
+    empty = False
+    if class_idx is None:
+        mask = np.argmax(proba_array, 0)
+        proba_array = np.moveaxis(proba_array, 0, -1)
+    else:
+        proba_array = np.where(proba_array < proba_threshold, 0.0, proba_array)
+        if isinstance(class_idx, int):
+            proba_array = proba_array[class_idx]
+        elif isinstance(class_idx, (list, tuple)):
+            proba_array = proba_array[class_idx].sum(0)
+        proba_array, _, _ = extract_lesion_candidates(
+            proba_array,
+            threshold=proba_threshold,
+            min_confidence=min_confidence,
+            intersect_with=intersect_with,
+            min_intersection=min_intersection,
+        )
+        mask = proba_array > proba_threshold
+        proba_map = sitk.GetImageFromArray(proba_array)
+        proba_map = copy_information_nd(proba_map, input_image)
+        mask = sitk.GetImageFromArray(mask.astype(np.uint32))
+        mask.CopyInformation(input_image)
+    mask_stats = sitk.LabelShapeStatisticsImageFilter()
+    mask_stats.Execute(mask)
+    if len(mask_stats.GetLabels()) == 0:
+        logger.warning("Mask is empty")
+        empty = True
+    if output_padding is not None:
+        pad_filter = sitk.ConstantPadImageFilter()
+        pad_filter.SetPadLowerBound([i - 1 for i in output_padding[:3]])
+        pad_filter.SetPadUpperBound([i + 1 for i in output_padding[3:]])
+        mask = pad_filter.Execute(mask)
+        proba_map = pad_filter.Execute(proba_map)
+
+    return proba_map, mask, empty
+
+
+def process_mask(
+    mask_array: np.ndarray,
+    input_image: sitk.Image,
+    intersect_with: str | sitk.Image | None = None,
+    min_intersection: float = 0.1,
+    output_padding: tuple[int, int, int, int, int, int] | None = None,
+) -> sitk.Image:
+    """
+    Exports a SITK probability mask and the corresponding prediction. Applies a
+    candidate extraction protocol (i.e. filtering probabilities above
+    proba_threshold, applying connected component analysis and filtering out
+    objects whose maximum probability is lower than min_confidence).
+
+    Args:
+        mask_array (np.ndarray): an array corresponding to a mask.
+        intersect_with (str | sitk.Image, optional): calculates the
+            intersection of each candidate with the image specified in
+            intersect_with. If the intersection is larger than
+            min_intersection, the candidate is kept; otherwise it is discarded.
+            Defaults to None.
+        min_intersection (float, optional): minimum intersection over the union
+            to keep candidate. Defaults to 0.1.
+        output_padding (list[int] | None, optional): padding to apply to the
+            output mask. Defaults to None.
+
+    Returns:
+        sitk.Image: returns the probability mask after the candidate extraction
+            protocol.
+    """
+    logger.info("Exporting mask")
+    empty = False
+    mask = sitk.GetImageFromArray(mask_array)
+    mask.CopyInformation(input_image)
+    mask_stats = sitk.LabelShapeStatisticsImageFilter()
+    mask_stats.Execute(mask)
+    if intersect_with is not None:
+        mask = intersect(mask, intersect_with, min_intersection)
+    print(mask_stats.GetLabels())
+    if len(mask_stats.GetLabels()) == 0:
+        logger.warning("Mask is empty")
+        empty = True
+    if output_padding is not None:
+        pad_filter = sitk.ConstantPadImageFilter()
+        pad_filter.SetPadLowerBound([i - 1 for i in output_padding[:3]])
+        pad_filter.SetPadUpperBound([i + 1 for i in output_padding[3:]])
+        mask = pad_filter.Execute(mask)
+
+    return mask, empty
+
+
 def single_model_inference(
     predictor: nnUNetPredictor,
     nnunet_path: str,
-    series_paths: list[str],
+    volumes: list[sitk.Image],
     output_dir: str,
     class_idx: int | list[int] = 1,
     checkpoint_name: str = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
-    is_dicom: bool = False,
     use_folds: Folds = (0,),
-    proba_threshold: float = 0.1,
+    proba_threshold: float | None = None,
     min_confidence: float | None = None,
     intersect_with: str | sitk.Image | None = None,
+    crop_from: str | sitk.Image | None = None,
+    crop_padding: tuple[int, int, int] | None = None,
     min_overlap: float = 0.1,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
     """
@@ -333,7 +748,7 @@ def single_model_inference(
     Args:
         predictor (nnUNetPredictor): nnUNet predictor.
         nnunet_path (str): path to nnUNet model.
-        series_paths (list[str]): paths to series.
+        series (list[str]): series volumes or paths to series.
         output_dir (str): output directory.
         class_idx (int | list[int], optional): class index for probability
             output. Defaults to 1.
@@ -351,8 +766,16 @@ def single_model_inference(
             each detected object. Defaults to None.
         intersect_with (str | sitk.Image | None, optional): whether the
             prediction should intersect with a given object. Defaults to None.
+        crop_from (str | sitk.Image | None, optional): whether the
+            input should be cropped centered on a given mask object. If
+            specified as a string, it can be either the path or the path:class_idx.
+            Defaults to None.
+        crop_padding (tuple[int, int, int] | None, optional): padding to be
+            added to the cropped region. Defaults to None.
         min_overlap (float, optional): fraction of prediction which should
             intersect with ``intersect_with``. Defaults to 0.1.
+        prediction_name (str | None, optional): name of the prediction. Defaults
+            to None.
 
     Raises:
         ValueError: if there is a mismatch between the number of series and
@@ -369,67 +792,79 @@ def single_model_inference(
         use_folds=use_folds,
         checkpoint_name=checkpoint_name,
     )
+    patch_size = predictor.configuration_manager.configuration["patch_size"]
 
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    prediction_files = []
-    term = predictor.dataset_json["file_ending"]
-    if len(predictor.dataset_json["channel_names"]) != len(series_paths):
+    predictor.dataset_json["file_ending"] = ".nii.gz"
+    if len(predictor.dataset_json["channel_names"]) != len(volumes):
         exp_chan = predictor.dataset_json["channel_names"]
         raise ValueError(
-            f"series_paths should have length {len(exp_chan)} ({exp_chan}) but has length {len(series_paths)}"
+            f"series_paths should have length {len(exp_chan)} ({exp_chan}) but has length {len(series)}"
         )
-    if is_dicom is True:
-        sitk_images = [
-            read_dicom_as_sitk(glob(f"{series_path}/*dcm"))
-            for series_path in series_paths
+    output_padding = None
+    if crop_from is not None:
+        logger.info(f"Cropping input")
+        bb, output_padding = get_crop(
+            crop_from, volumes[0], crop_padding, patch_size[::-1]
+        )
+        volumes = [
+            v[bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]] for v in volumes
         ]
-        good_file_paths = [x[1] for x in sitk_images]
-        sitk_images = [x[0] for x in sitk_images]
-        for idx in range(1, len(sitk_images)):
-            sitk_images[idx] = resample_image_to_target(
-                sitk_images[idx], target=sitk_images[0]
-            )
-        for idx, image in enumerate(sitk_images):
-            file_termination = f"{idx}".rjust(4, "0")
-            sitk_image_path = f"{tmp_dir}/volume_{file_termination}{term}"
-            prediction_files.append(sitk_image_path)
-            sitk.WriteImage(image, sitk_image_path)
+
+    logger.info("Running inference using %s", nnunet_path)
+    input_array = np.stack([sitk.GetArrayFromImage(v) for v in volumes])
+    image_properties = {
+        "spacing": volumes[0].GetSpacing()[::-1],
+        "origin": volumes[0].GetOrigin(),
+        "direction": volumes[0].GetDirection(),
+        "size": volumes[0].GetSize(),
+    }
+    logger.info("Input shape: %s", input_array.shape)
+    logger.info("Input spacing: %s", volumes[0].GetSpacing())
+    logger.info("Input origin: %s", volumes[0].GetOrigin())
+    logger.info("Input direction: %s", volumes[0].GetDirection())
+    logger.info("Input size: %s", volumes[0].GetSize())
+    logger.info("nnUNet: creating data iterator")
+    iterator = predictor.get_data_iterator_from_raw_npy_data(
+        [input_array], None, [image_properties], None, 1
+    )
+    logger.info("nnUNet: running inference")
+    prediction = predict_from_data_iterator_local(
+        predictor, iterator, save_probabilities=True, class_idx=class_idx
+    )
+    logger.info("nnUNet: inference done")
+    if proba_threshold is not None:
+        mask_array, proba_array = prediction
     else:
-        for idx, series_path in enumerate(series_paths):
-            file_termination = f"{idx}".rjust(4, "0")
-            tmp_path = f"{tmp_dir}/volume_{file_termination}{term}"
-            # rewrite with correct nnunet formatting
-            sitk.WriteImage(sitk.ReadImage(series_path), tmp_path)
-            prediction_files.append(tmp_path)
+        mask_array, proba_array = prediction, None
 
-    predictor.predict_from_files(
-        [prediction_files],
-        output_dir,
-        save_probabilities=True,
-        num_processes_preprocessing=1,
-        num_processes_segmentation_export=1,
-    )
+    if proba_array is not None:
+        mask, _ = process_proba_array(
+            proba_array,
+            volumes[0],
+            output_dir=output_dir,
+            min_confidence=min_confidence,
+            proba_threshold=proba_threshold,
+            intersect_with=intersect_with,
+            min_intersection=min_overlap,
+            class_idx=[i for i in range(1, len(class_idx) + 1)],
+            output_padding=output_padding,
+        )
+    else:
+        mask, _ = process_mask(
+            mask_array,
+            volumes[0],
+            intersect_with=intersect_with,
+            min_intersection=min_overlap,
+            output_padding=output_padding,
+            class_idx=[i for i in range(1, len(class_idx) + 1)],
+        )
+        probability_map = None
 
-    probability_map, mask = export_proba_map_and_mask(
-        prediction_files,
-        output_dir=output_dir,
-        min_confidence=min_confidence,
-        proba_threshold=proba_threshold,
-        intersect_with=intersect_with,
-        min_intersection=min_overlap,
-        class_idx=class_idx,
-    )
+    logger.info("Finished processing masks")
 
-    output_mask_path = f"{output_dir}/prediction.nii.gz"
-    sitk.WriteImage(mask, output_mask_path)
-
-    return (
-        prediction_files,
-        output_mask_path,
-        good_file_paths,
-        probability_map,
-    )
+    return mask, probability_map
 
 
 def get_info(dataset_json_path: str) -> dict:
@@ -460,6 +895,9 @@ def multi_model_inference(
     min_confidence: float | tuple[float] | list[float] | None = None,
     intersect_with: str | sitk.Image | None = None,
     min_overlap: float = 0.1,
+    crop_from: str | sitk.Image | None = None,
+    crop_padding: tuple[int, int, int] | None = None,
+    cascade_mode: str = "intersect",
 ):
     """
     Prediction wraper for multiple models. Exports the outputs.
@@ -487,16 +925,12 @@ def multi_model_inference(
             prediction should intersect with a given object. Defaults to None.
         min_overlap (float, optional): fraction of prediction which should
             intersect with ``intersect_with``. Defaults to 0.1.
-        save_proba_map (bool, optional): whether to save the probability map.
-            Defaults to False.
-        save_nifti_inputs (bool, optional): whether to save the nifti inputs.
-            Defaults to False.
-        save_rt_struct_output (bool, optional): whether to save the prediction
-            as RT struct. Defaults to False.
-        suffix (str | None, optional): a suffix for the prediction. Defaults to
-            None.
-        metadata_path (str | None, optional): path to DICOM metadata file for
-            final prediction. Defaults to None.
+        crop_from (str | sitk.Image | None, optional): whether the
+            input should be cropped centered on a given mask object. Defaults to None.
+        crop_padding (tuple[int, int, int] | None, optional): padding to be
+            added to the cropped region. Defaults to None.
+        cascade_mode (str, optional): whether to crop inputs to consecutive bounding boxes
+            or to intersect consecutive outputs. Defaults to "intersect".
     """
 
     def coherce_to_list(obj: Any, n: int) -> list[Any] | tuple[Any]:
@@ -504,7 +938,7 @@ def multi_model_inference(
             if len(obj) != n:
                 raise ValueError(f"{obj} should have length {n}")
         else:
-            obj = [obj for obj in range(n)]
+            obj = [obj for _ in range(n)]
         return obj
 
     output_dir = output_dir.strip().rstrip("/")
@@ -533,55 +967,81 @@ def multi_model_inference(
             raise ValueError(
                 f"series_paths should be list of strings or list of list of strings (is {series_paths})"
             )
+
+        logger.info("Using nnunet_path %s for inference", nnunet_path)
+        logger.info("Using series_paths %s for inference", series_paths)
+        logger.info("Using class_idx_list %s for inference", class_idx_list)
+        logger.info("Using proba_threshold %s for inference", proba_threshold)
+        logger.info("Using min_confidence %s for inference", min_confidence)
+        logger.info("Using checkpoint_name %s for inference", checkpoint_name)
+
+        all_volumes, all_good_file_paths = load_series(series_paths, is_dicom)
+        all_predictions = []
+        all_proba_maps = []
         for i in range(len(nnunet_path)):
             if i == (len(nnunet_path) - 1):
                 out = output_dir
             else:
-                out = tmp_dir
-            sitk_files, mask_path, good_file_paths, proba_map = (
-                single_model_inference(
-                    predictor=predictor,
-                    nnunet_path=nnunet_path[i].strip(),
-                    series_paths=series_paths[i],
-                    class_idx=class_idx_list[i],
-                    checkpoint_name=checkpoint_name.strip(),
-                    output_dir=out,
-                    tmp_dir=tmp_dir,
-                    is_dicom=is_dicom,
-                    use_folds=use_folds,
-                    proba_threshold=proba_threshold[i],
-                    min_confidence=min_confidence[i],
-                    intersect_with=intersect_with,
-                    min_overlap=min_overlap,
-                )
-            )
-            intersect_with = mask_path
-    else:
-        sitk_files, mask_path, good_file_paths, proba_map = (
-            single_model_inference(
+                out = os.path.join(tmp_dir, f"stage_{i}")
+            mask, proba_map = single_model_inference(
                 predictor=predictor,
-                nnunet_path=nnunet_path.strip(),
-                series_paths=series_paths,
+                nnunet_path=nnunet_path[i].strip(),
+                volumes=all_volumes[i],
+                class_idx=class_idx_list[i],
                 checkpoint_name=checkpoint_name.strip(),
-                output_dir=output_dir,
-                tmp_dir=tmp_dir,
-                is_dicom=is_dicom,
+                output_dir=out,
+                tmp_dir=os.path.join(tmp_dir, f"stage_{i}"),
                 use_folds=use_folds,
-                proba_threshold=proba_threshold,
-                min_confidence=min_confidence,
+                proba_threshold=proba_threshold[i],
+                min_confidence=min_confidence[i],
                 intersect_with=intersect_with,
                 min_overlap=min_overlap,
+                crop_from=crop_from,
+                crop_padding=crop_padding,
             )
+            all_predictions.append(mask)
+            all_proba_maps.append(proba_map)
+            if i < (len(nnunet_path) - 1):
+                if cascade_mode == "intersect":
+                    logger.info("Using mask for intersection")
+                    intersect_with = mask
+                elif cascade_mode == "crop":
+                    logger.info("Using mask for cropping")
+                    crop_from = mask
+        # keep first from last predicted series to replicate previous behaviour
+        if is_dicom:
+            good_file_paths = [all_good_file_paths[series_paths[-1][0]]]
+        else:
+            good_file_paths = None
+    else:
+        mask, proba_map = single_model_inference(
+            predictor=predictor,
+            nnunet_path=nnunet_path.strip(),
+            series_paths=series_paths,
+            checkpoint_name=checkpoint_name.strip(),
+            output_dir=output_dir,
+            tmp_dir=tmp_dir,
+            use_folds=use_folds,
+            proba_threshold=proba_threshold,
+            min_confidence=min_confidence,
+            intersect_with=intersect_with,
+            min_overlap=min_overlap,
+            crop_from=crop_from,
+            crop_padding=crop_padding,
         )
+        all_predictions = [mask]
+        all_proba_maps = [proba_map]
 
-    return sitk_files, mask_path, good_file_paths, proba_map
+    logger.info("Finished inference")
+
+    return all_predictions, all_proba_maps, good_file_paths
 
 
 def export_predictions(
-    mask_path: str,
+    masks: list[sitk.Image],
     output_dir: str,
-    sitk_files: list[str] | None = None,
-    proba_map: sitk.Image | None = None,
+    volumes: list[list[sitk.Image]] | None = None,
+    proba_maps: list[list[sitk.Image]] | None = None,
     good_file_paths: list[str] | None = None,
     suffix: str | None = None,
     is_dicom: bool = False,
@@ -590,8 +1050,6 @@ def export_predictions(
     save_nifti_inputs: bool = False,
     save_rt_struct_output: bool = False,
 ):
-    mask = sitk.ReadImage(mask_path)
-
     output_names = {
         "prediction": (
             "prediction" if suffix is None else f"prediction_{suffix}"
@@ -602,21 +1060,29 @@ def export_predictions(
         "struct": "struct" if suffix is None else f"struct_{suffix}",
     }
 
-    output_paths = {
-        "nifti_prediction": mask_path,
-        "nifti_probabilities": f"{output_dir}/{output_names['probabilities']}.nii.gz",
-    }
+    output_paths = {}
+
+    for i, mask in enumerate(masks):
+        output_paths[f"nifti_prediction_{i}"] = (
+            f"{output_dir}/stage_{i}/{output_names['prediction']}.nii.gz"
+        )
+        sitk.WriteImage(mask, output_paths[f"nifti_prediction_{i}"])
+
+    for i, proba_map in enumerate(proba_maps):
+        output_paths[f"nifti_probabilities_{i}"] = (
+            f"{output_dir}/stage_{i}/{output_names['probabilities']}.nii.gz"
+        )
+        sitk.WriteImage(proba_map, output_paths[f"nifti_probabilities_{i}"])
 
     if save_nifti_inputs is True:
         niftis = []
-        for sitk_file in sitk_files:
-            basename = os.path.basename(sitk_file)
-            for s in [".mha", ".nii.gz"]:
-                basename = basename.rstrip(s)
-            output_nifti = f"{output_dir}/{basename}.nii.gz"
-            print(f"Copying Nifti to {output_nifti}")
-            sitk.WriteImage(sitk.ReadImage(sitk_file), output_nifti)
-            niftis.append(output_nifti)
+        for i, volume_set in enumerate(volumes):
+            curr_stage = Path(f"{output_dir}/stage_{i}").mkdir(exist_ok=True)
+            for volume in volume_set:
+                output_nifti = curr_stage / Path(volume).name
+                logger.info(f"Copying Nifti to {output_nifti}")
+                sitk.WriteImage(volume, output_nifti)
+                niftis.append(output_nifti)
         output_paths["nifti_inputs"] = niftis
 
     if is_dicom is True:
@@ -624,44 +1090,46 @@ def export_predictions(
             raise ValueError(
                 "if is_dicom is True metadata_path must be specified"
             )
-        status = export_to_dicom_seg(
-            mask,
-            metadata_path=metadata_path,
-            file_paths=good_file_paths,
-            output_dir=output_dir,
-            output_file_name=output_names["prediction"],
-        )
-        if "empty" in status:
-            print("Mask is empty, skipping DICOMseg/RTstruct")
-        elif save_rt_struct_output:
-            export_to_dicom_struct(
+        for i, mask in enumerate(masks):
+            status = export_to_dicom_seg(
                 mask,
                 metadata_path=metadata_path,
                 file_paths=good_file_paths,
-                output_dir=output_dir,
-                output_file_name=output_names["struct"],
+                output_dir=f"{output_dir}/stage_{i}",
+                output_file_name=output_names["prediction"],
             )
-            output_paths["dicom_struct"] = (
-                f"{output_dir}/{output_names['struct']}.dcm"
-            )
-            output_paths["dicom_segmentation"] = (
-                f"{output_dir}/{output_names['prediction']}.dcm"
-            )
-        else:
-            output_paths["dicom_segmentation"] = (
-                f"{output_dir}/{output_names['prediction']}.dcm"
-            )
+            if "empty" in status:
+                logger.info("Mask is empty, skipping DICOMseg/RTstruct")
+            elif save_rt_struct_output:
+                export_to_dicom_struct(
+                    mask,
+                    metadata_path=metadata_path,
+                    file_paths=good_file_paths,
+                    output_dir=f"{output_dir}/stage_{i}",
+                    output_file_name=output_names["struct"],
+                )
+                output_paths["dicom_struct"] = (
+                    f"{output_dir}/stage_{i}/{output_names['struct']}.dcm"
+                )
+                output_paths["dicom_segmentation"] = (
+                    f"{output_dir}/stage_{i}/{output_names['prediction']}.dcm"
+                )
+            else:
+                output_paths["dicom_segmentation"] = (
+                    f"{output_dir}/stage_{i}/{output_names['prediction']}.dcm"
+                )
 
         if save_proba_map is True:
-            export_fractional_dicom_seg(
-                proba_map,
-                metadata_path=metadata_path,
-                file_paths=good_file_paths,
-                output_dir=output_dir,
-                output_file_name=output_names["probabilities"],
-            )
-            output_paths["dicom_fractional_segmentation"] = (
-                f"{output_dir}/{output_names['probabilities']}.dcm"
-            )
+            for i, proba_map in enumerate(proba_maps):
+                export_fractional_dicom_seg(
+                    proba_map,
+                    metadata_path=metadata_path,
+                    file_paths=good_file_paths,
+                    output_dir=f"{output_dir}/stage_{i}",
+                    output_file_name=output_names["probabilities"],
+                )
+                output_paths["dicom_fractional_segmentation"] = (
+                    f"{output_dir}/stage_{i}/{output_names['probabilities']}.dcm"
+                )
 
     return output_paths

@@ -10,12 +10,14 @@ import time
 import re
 import os
 import yaml
+import numpy as np
 import fastapi
 import uvicorn
 import torch
 from dataclasses import dataclass
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .nnunet_serve_utils import (
     FAILURE_STATUS,
@@ -27,9 +29,20 @@ from .nnunet_serve_utils import (
     predict,
     InferenceRequest,
 )
+from .logging_utils import get_logger
+
+torch.serialization.add_safe_globals(
+    [
+        np.core.multiarray.scalar,
+        np.dtype,
+        np.dtypes.Float64DType,
+        np.dtypes.Float32DType,
+    ]
+)
 
 origins = ["http://localhost:8404"]
 
+logger = get_logger(__name__)
 
 @dataclass
 class nnUNetAPI:
@@ -55,15 +68,18 @@ class nnUNetAPI:
         # check if nnunet_id is a list
         if isinstance(nnunet_id, str):
             if nnunet_id not in self.alias_dict:
-                return {
-                    "time_elapsed": None,
-                    "gpu": None,
-                    "nnunet_path": None,
-                    "metadata_path": None,
-                    "request": inference_request.__dict__,
-                    "status": FAILURE_STATUS,
-                    "error": f"{nnunet_id} is not a valid nnunet_id",
-                }
+                return JSONResponse(
+                    content={
+                        "time_elapsed": None,
+                        "gpu": None,
+                        "nnunet_path": None,
+                        "metadata_path": None,
+                        "request": inference_request.__dict__,
+                        "status": FAILURE_STATUS,
+                        "error": f"{nnunet_id} is not a valid nnunet_id",
+                    },
+                    status_code=400,
+                )
             nnunet_info = self.model_dictionary[self.alias_dict[nnunet_id]]
             nnunet_path = nnunet_info["path"]
             min_mem = nnunet_info.get("min_mem", 4000)
@@ -74,15 +90,18 @@ class nnUNetAPI:
             min_mem = 0
             for nn in nnunet_id:
                 if nn not in self.alias_dict:
-                    return {
-                        "time_elapsed": None,
-                        "gpu": None,
-                        "nnunet_path": None,
-                        "metadata_path": None,
-                        "request": inference_request.__dict__,
-                        "status": FAILURE_STATUS,
-                        "error": f"{nnunet_id} is not a valid nnunet_id",
-                    }
+                    return JSONResponse(
+                        content={
+                            "time_elapsed": None,
+                            "gpu": None,
+                            "nnunet_path": None,
+                            "metadata_path": None,
+                            "request": inference_request.__dict__,
+                            "status": FAILURE_STATUS,
+                            "error": f"{nn} is not a valid nnunet_id",
+                        },
+                        status_code=400,
+                    )
                 nnunet_info = self.model_dictionary[self.alias_dict[nn]]
                 nnunet_path.append(nnunet_info["path"])
                 curr_min_mem = nnunet_info.get("min_mem", 4000)
@@ -107,15 +126,18 @@ class nnUNetAPI:
         )
 
         if code == FAILURE_STATUS:
-            return {
-                "time_elapsed": None,
-                "gpu": None,
-                "nnunet_path": None,
-                "metadata_path": None,
-                "status": FAILURE_STATUS,
-                "request": inference_request.__dict__,
-                "error": error_msg,
-            }
+            return JSONResponse(
+                content={
+                    "time_elapsed": None,
+                    "gpu": None,
+                    "nnunet_path": None,
+                    "metadata_path": None,
+                    "status": FAILURE_STATUS,
+                    "request": inference_request.__dict__,
+                    "error": error_msg,
+                },
+                status_code=400,
+            )
 
         device_id = wait_for_gpu(min_mem)
 
@@ -158,7 +180,7 @@ class nnUNetAPI:
         torch.cuda.empty_cache()
         b = time.time()
 
-        return {
+        payload = {
             "time_elapsed": b - a,
             "gpu": device_id,
             "nnunet_path": nnunet_path,
@@ -168,24 +190,32 @@ class nnUNetAPI:
             "error": error,
             **output_paths,
         }
+        if status == FAILURE_STATUS:
+            return JSONResponse(content=payload, status_code=500)
+        return payload
 
 
 def get_model_dictionary():
-    with open("model-serve-spec.yaml") as o:
+    model_spec_path = os.environ.get(
+        "MODEL_SERVE_SPEC", "model-serve-spec.yaml"
+    )
+    with open(model_spec_path) as o:
         models_specs = yaml.safe_load(o)
     alias_dict = {}
-    for k in models_specs["models"]:
-        model_name = models_specs["models"][k]["name"]
-        alias_dict[model_name] = model_name
-        if "aliases" in models_specs["models"][k]:
-            for alias in models_specs["models"][k]["aliases"]:
-                alias_dict[alias] = model_name
-            del models_specs["models"][k]["aliases"]
+    for model in models_specs["models"]:
+        k = model["id"]
+        model_name = model["name"]
+        alias_dict[model_name] = k
+        alias_dict[k] = k
+        if "aliases" in model:
+            for alias in model["aliases"]:
+                alias_dict[alias] = k
+            del model["aliases"]
     if "model_folder" not in models_specs:
         raise ValueError(
             "model_folder must be specified in model-serve-spec.yaml"
         )
-    grep_str = "|".join([k for k in models_specs["models"]])
+    grep_str = "|".join([model["rel_path"] for model in models_specs["models"]])
     pat = re.compile(grep_str)
 
     model_folder = models_specs["model_folder"]
@@ -205,28 +235,37 @@ def get_model_dictionary():
                 model_dictionary[match]["model_information"]["labels"]
             )
 
-    model_dictionary = {
-        m: {
-            **model_dictionary[m],
-            **models_specs["models"].get(m, None),
-            "default_args": models_specs["models"][m].get("default_args", {}),
-        }
-        for m in model_dictionary
-        if m in models_specs["models"]
-    }
-    return model_dictionary, alias_dict
+    output_model_dictionary = {}
+    for m in model_dictionary:
+        model_spec = [
+            model for model in models_specs["models"] if model["rel_path"] == m
+        ]
+        if len(model_spec) == 0:
+            continue
+        model_spec = model_spec[0]
+        k = model_spec["id"]
+        output_model_dictionary[k] = model_dictionary[m]
+        output_model_dictionary[k].update(model_spec)
+    logger.info("Model dictionary: %s", output_model_dictionary)
+    logger.info("Alias dictionary: %s", alias_dict)
+    return output_model_dictionary, alias_dict
 
 
-app = fastapi.FastAPI()
-nnunet_api = nnUNetAPI(app)
+def create_app():
+    app = fastapi.FastAPI()
+    nnunet_api = nnUNetAPI(app)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    return nnunet_api.app
+
 
 if __name__ == "__main__":
-    uvicorn.run(nnunet_api.app, host="0.0.0.0", port=12345)
+    uvicorn.run(
+        "utils.nnunet_serve:create_app", host="0.0.0.0", port=12345, reload=True
+    )
