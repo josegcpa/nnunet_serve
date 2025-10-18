@@ -10,6 +10,9 @@ from scipy import ndimage
 import numpy as np
 import logging
 from tqdm import tqdm
+from .logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 from typing import Sequence
 
@@ -444,7 +447,7 @@ def read_dicom_as_sitk(file_paths: list[str], metadata: dict[str, str] = {}):
             [get_pixel_data(f) for f in fs],
         )
     except Exception as e:
-        print(e)
+        logger.error(e)
         raise RuntimeError(f"Pixel data could not be read for {series_path}")
 
     sitk_image = sitk.GetImageFromArray(pixel_data)
@@ -510,7 +513,7 @@ def export_to_dicom_seg(
 
     dcm = writer.write(mask, file_paths[0])
     output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
-    print(f"writing dicom output to {output_dcm_path}")
+    logger.info(f"writing dicom output to {output_dcm_path}")
     dcm.save_as(output_dcm_path)
     return "success"
 
@@ -542,7 +545,7 @@ def export_to_dicom_seg_dcmqi(
     import subprocess
 
     output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
-    print(f"converting to dicom-seg in {output_dcm_path}")
+    logger.info(f"converting to dicom-seg in {output_dcm_path}")
     subprocess.call(
         [
             "itkimage2segimage",
@@ -583,7 +586,7 @@ def export_to_dicom_struct(
             mask contained no values.
     """
     rt_struct_output = f"{output_dir}/{output_file_name}.dcm"
-    print(f"writing dicom struct to {rt_struct_output}")
+    logger.info(f"writing dicom struct to {rt_struct_output}")
 
     mask_array = np.transpose(sitk.GetArrayFromImage(mask), [1, 2, 0])
 
@@ -610,14 +613,15 @@ def export_to_dicom_struct(
 def export_proba_map_and_mask(
     sitk_files: list[str],
     output_dir: str,
-    proba_threshold: float | None = 0.1,
-    min_confidence: float | None = None,
+    proba_threshold: float = 0.1,
+    min_confidence: float = 0.5,
     intersect_with: str | sitk.Image | None = None,
     min_intersection: float = 0.1,
     input_file_name: str = "volume",
-    output_proba_map_file_name: str = "probabilities",
-    output_mask_file_name: str = "prediction",
+    output_proba_map_file_name: str | None = "probabilities",
+    output_mask_file_name: str | None = "prediction",
     class_idx: int | list[int] | None = None,
+    output_padding: list[int] | None = None,
 ) -> sitk.Image:
     """
     Exports a SITK probability mask and the corresponding prediction. Applies a
@@ -645,18 +649,20 @@ def export_proba_map_and_mask(
             Defaults to "prediction".
         class_idx (int | list[int] | None, optional): class index for output
             probability. Defaults to None (no selection).
+        output_padding (list[int] | None, optional): padding to apply to the
+            output mask. Defaults to None.
 
     Returns:
         sitk.Image: returns the probability mask after the candidate extraction
             protocol.
     """
-
+    logger.info("Exporting probability map and mask")
     input_proba_map = f"{output_dir}/{input_file_name}.npz"
     output_proba_map = f"{output_dir}/{output_proba_map_file_name}.nii.gz"
     output_mask = f"{output_dir}/{output_mask_file_name}.nii.gz"
     input_file = sitk.ReadImage(sitk_files[0])
-    proba_array: np.ndarray = np.load(input_proba_map)["probabilities"]
     empty = False
+    proba_array: np.ndarray = np.load(input_proba_map)["probabilities"]
     if class_idx is None:
         mask = np.argmax(proba_array, 0)
         proba_array = np.moveaxis(proba_array, 0, -1)
@@ -674,21 +680,95 @@ def export_proba_map_and_mask(
             min_intersection=min_intersection,
         )
         mask = proba_array > proba_threshold
-    if mask.sum() == 0:
-        mask[0, 0, 0] = 1
-        proba_array[0, 0, 0] = 1
+        proba_map = sitk.GetImageFromArray(proba_array)
+        proba_map = copy_information_nd(proba_map, input_file)
+        mask = sitk.GetImageFromArray(mask.astype(np.uint32))
+        mask.CopyInformation(input_file)
+    mask_stats = sitk.LabelShapeStatisticsImageFilter()
+    mask_stats.Execute(mask)
+    if len(mask_stats.GetLabels()) == 0:
+        logger.warning("Mask is empty")
         empty = True
-    proba_map = sitk.GetImageFromArray(proba_array)
-    proba_map = copy_information_nd(proba_map, input_file)
-    mask = sitk.GetImageFromArray(mask.astype(np.uint32))
-    mask.CopyInformation(input_file)
+    if output_padding is not None:
+        pad_filter = sitk.ConstantPadImageFilter()
+        pad_filter.SetPadLowerBound([i - 1 for i in output_padding[:3]])
+        pad_filter.SetPadUpperBound([i + 1 for i in output_padding[3:]])
+        mask = pad_filter.Execute(mask)
+        proba_map = pad_filter.Execute(proba_map)
 
-    print(f"writing probability map to {output_proba_map}")
+    logger.info(f"writing probability map to {output_proba_map}")
     sitk.WriteImage(proba_map, output_proba_map)
-    print(f"writing mask to {output_mask}")
+    logger.info(f"writing mask to {output_mask}")
     sitk.WriteImage(mask, output_mask)
 
     return proba_map, mask, empty
+
+
+def export_mask(
+    output_dir: str,
+    input_file_name: str = "volume",
+    output_mask_file_name: str = "prediction",
+    intersect_with: str | sitk.Image | None = None,
+    min_intersection: float = 0.1,
+    class_idx: int | list[int] | None = None,
+    output_padding: list[int] | None = None,
+) -> sitk.Image:
+    """
+    Exports a SITK mask.
+
+    Args:
+        mask (sitk.Image): an SITK file object corresponding to a mask.
+        metadata_path (str): path to metadata template file.
+        proba_threshold (float, optional): sets values below this value to 0.
+        min_confidence (float, optional): removes objects whose maximum
+            probability is lower than this value.
+        intersect_with (str | sitk.Image, optional): calculates the
+            intersection of each candidate with the image specified in
+            intersect_with. If the intersection is larger than
+            min_intersection, the candidate is kept; otherwise it is discarded.
+            Defaults to None.
+        min_intersection (float, optional): minimum intersection over the union
+            to keep candidate. Defaults to 0.1.
+        input_file_name (str, optional): input file name. Defaults to "volume".
+        output_mask_file_name (str, optional): output file name for mask.
+            Defaults to "prediction".
+        class_idx (int | list[int] | None, optional): class index for output
+            probability. Defaults to None (no selection).
+        output_padding (list[int] | None, optional): padding to apply to the
+            output mask. Defaults to None.
+
+    Returns:
+        sitk.Image: returns the probability mask after the candidate extraction
+            protocol.
+    """
+    logger.info("Exporting mask")
+    input_mask = f"{output_dir}/{input_file_name}.nii.gz"
+    output_mask = f"{output_dir}/{output_mask_file_name}.nii.gz"
+    empty = False
+    mask = sitk.ReadImage(input_mask)
+    mask_stats = sitk.LabelShapeStatisticsImageFilter()
+    mask_stats.Execute(mask)
+    if len(mask_stats.GetLabels()) == 0:
+        logger.warning("Mask is empty")
+        empty = True
+    if output_padding is not None:
+        pad_filter = sitk.ConstantPadImageFilter()
+        pad_filter.SetPadLowerBound(output_padding[:3])
+        pad_filter.SetPadUpperBound(output_padding[3:])
+        mask = pad_filter.Execute(mask)
+    if class_idx is not None:
+        mask = sitk.Cast(mask == class_idx, sitk.sitkUInt32)
+    if intersect_with is not None:
+        logger.info(f"Intersecting with {intersect_with}")
+        if isinstance(intersect_with, str):
+            intersect_with = sitk.ReadImage(intersect_with)
+        if isinstance(intersect_with, sitk.Image):
+            intersect_with = sitk.GetArrayFromImage(intersect_with)
+        mask = intersect(mask, intersect_with, min_intersection)
+    logger.info(f"writing mask to {output_mask}")
+    sitk.WriteImage(mask, output_mask)
+
+    return mask, empty
 
 
 def export_fractional_dicom_seg(
@@ -732,7 +812,7 @@ def export_fractional_dicom_seg(
 
         dcm = writer.write(proba_map, file_paths[0])
         output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
-        print(f"writing dicom output to {output_dcm_path}")
+        logger.info(f"writing dicom output to {output_dcm_path}")
         dcm.save_as(output_dcm_path)
     else:
         with open(metadata_path) as o:
@@ -854,6 +934,38 @@ def calculate_iou_a_over_b(a: np.ndarray, b: np.ndarray) -> float:
     return intersection / union
 
 
+def intersect(
+    mask: sitk.Image | np.ndarray,
+    intersect_with: sitk.Image | np.ndarray,
+    min_intersection: float = 0.1,
+) -> sitk.Image | np.ndarray:
+    mask_is_sitk = isinstance(mask, sitk.Image)
+    if mask_is_sitk:
+        mask_arr = sitk.GetArrayFromImage(mask)
+    else:
+        mask_arr = np.asarray(mask)
+    if isinstance(intersect_with, str):
+        intersect_with = sitk.ReadImage(intersect_with)
+    if isinstance(intersect_with, sitk.Image):
+        ref_arr = sitk.GetArrayFromImage(intersect_with)
+    else:
+        ref_arr = np.asarray(intersect_with)
+    ref_arr = (ref_arr > 0).astype(np.uint8)
+    binary_mask = (mask_arr > 0).astype(np.uint8)
+    labels, num = ndimage.label(binary_mask, structure=np.ones((3, 3, 3)))
+    for idx in range(1, num + 1):
+        comp = (labels == idx).astype(np.uint8)
+        overlap = calculate_iou_a_over_b(comp, ref_arr)
+        if overlap < min_intersection:
+            mask_arr[comp.astype(bool)] = 0
+    if mask_is_sitk:
+        out = sitk.GetImageFromArray(mask_arr)
+        out.CopyInformation(mask)
+        return out
+    else:
+        return mask_arr
+
+
 def extract_lesion_candidates(
     softmax: np.ndarray,
     threshold: float = 0.10,
@@ -909,7 +1021,7 @@ def extract_lesion_candidates(
         min_confidence = threshold
 
     if intersect_with is not None:
-        print(f"Intersecting with {intersect_with}")
+        logger.info(f"Intersecting with {intersect_with}")
         if isinstance(intersect_with, str):
             intersect_with = sitk.ReadImage(intersect_with)
         if isinstance(intersect_with, sitk.Image):
@@ -1063,7 +1175,7 @@ def make_parser(
     )
     parser.add_argument(
         "--rt_struct_output",
-        help="Produces a DICOM RT Struct file (struct.dcm in output_dir)",
+        help="Produces a DICOM RT Struct file (struct.dcm in output_dir; requires DICOM input)",
         action="store_true",
     )
     parser.add_argument(
