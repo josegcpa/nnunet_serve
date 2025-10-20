@@ -7,9 +7,7 @@ import argparse
 from glob import glob
 from pydicom import dcmread
 from scipy import ndimage
-import numpy as np
-import logging
-from tqdm import tqdm
+from .seg_writers import SegWriter
 from .logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -26,61 +24,6 @@ Folds = (
 
 RESCALE_INTERCEPT_TAG = (0x0028, 0x1052)
 RESCALE_SLOPE_TAG = (0x0028, 0x1053)
-
-
-def save_mask_as_rtstruct(
-    img_data: np.ndarray,
-    dcm_reference_file: str,
-    output_path: str,
-    segment_info: list[tuple[str, list[int]]],
-) -> None:
-    """
-    Converts a numpy array to an RT (radiotherapy) struct object. Could be a
-        multi-class object (each n > 0 corresponds to a class). The number of
-        classes corresponds to ``np.unique(img_data).shape[0] - 1``.
-
-    Args:
-        img_data (np.ndarray): numpy array with n non-zero unique values, each
-            of which corresponds to a class.
-        dcm_reference_file (str): reference DICOM files.
-        output_path (str): output file for RT struct file.
-        segment_info (tuple[str, list[int]]): segment information. Should be a
-            list with size equal to the number of classes, and each element
-            should be a tuple whose first element is the segment description
-            and the second element a list of RGB values.
-    """
-    try:
-        from rt_utils import RTStructBuilder
-    except ImportError:
-        raise ImportError(
-            "rt_utils is required to save masks in RT struct format"
-        )
-    # based on the TotalSegmentator implementation
-
-    logging.basicConfig(level=logging.WARNING)  # avoid messages from rt_utils
-
-    # create new RT Struct - requires original DICOM
-    rtstruct = RTStructBuilder.create_new(dicom_series_path=dcm_reference_file)
-
-    # retrieve selected classes
-    selected_classes = np.unique(img_data)
-    selected_classes = selected_classes[selected_classes > 0].tolist()
-    if len(selected_classes) == 0:
-        return None
-
-    # add mask to RT Struct
-    for class_idx in tqdm(selected_classes):
-        class_name, class_colour = segment_info[class_idx - 1]
-        binary_img = img_data == class_idx
-        if binary_img.sum() > 0:  # only save none-empty images
-            # add segmentation to RT Struct
-            rtstruct.add_roi(
-                mask=binary_img,  # has to be a binary numpy array
-                name=class_name,
-                color=class_colour,
-            )
-
-    rtstruct.save(str(output_path))
 
 
 def copy_information_nd(
@@ -432,7 +375,7 @@ def read_dicom_as_sitk(file_paths: list[str], metadata: dict[str, str] = {}):
     )
     z_position = np.sort(real_position[:, z_axis])
     z_spacing = np.median(np.diff(z_position))
-    if np.isclose(z_spacing, 0) == True:
+    if np.isclose(z_spacing, 0):
         raise RuntimeError(
             f"Incorrect z-spacing information for {series_path}."
             + "This may be due to multiple slices having identical positions"
@@ -479,42 +422,39 @@ def get_study_uid(dicom_dir: str) -> str:
 
 def export_to_dicom_seg(
     mask: sitk.Image,
-    metadata_path: str,
+    metadata: dict[str, str],
     file_paths: Sequence[Sequence[str]],
     output_dir: str,
     output_file_name: str = "prediction",
+    is_fractional: bool = False,
 ) -> str:
     """
     Exports a SITK image mask as a DICOM segmentation object.
 
     Args:
         mask (sitk.Image): an SITK file object corresponding to a mask.
-        metadata_path (str): path to metadata template file.
+        metadata (dict[str, str]): metadata template.
         file_paths (Sequence[str]): list of DICOM file paths corresponding to the
             original series.
         output_dir (str): path to output directory.
         output_file_name (str, optional): output file name. Defaults to
             "prediction".
+        is_fractional (bool, optional): whether the mask is fractional. Defaults to
+            False.
 
     Returns:
         str: "success" if the process was successful, "empty mask" if the SITK
             mask contained no values.
     """
-    import pydicom_seg
-
-    metadata_template = pydicom_seg.template.from_dcmqi_metainfo(
-        metadata_path.strip()
-    )
-    writer = pydicom_seg.MultiClassWriter(
-        template=metadata_template,
-        skip_empty_slices=True,
-        skip_missing_segment=False,
-    )
-
-    dcm = writer.write(mask, file_paths[0])
+    seg_writer = SegWriter.init_from_metadata_dict(metadata)
     output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
+    seg_writer.write_dicom_seg(
+        mask,
+        file_paths[0],
+        output_dcm_path,
+        is_fractional=is_fractional,
+    )
     logger.info(f"writing dicom output to {output_dcm_path}")
-    dcm.save_as(output_dcm_path)
     return "success"
 
 
@@ -559,54 +499,6 @@ def export_to_dicom_seg_dcmqi(
             metadata_path,
         ]
     )
-    return "success"
-
-
-def export_to_dicom_struct(
-    mask: sitk.Image,
-    metadata_path: str,
-    file_paths: list[list[str]],
-    output_dir: str,
-    output_file_name: str = "struct",
-) -> str:
-    """
-    Exports a SITK image mask as a DICOM struct object.
-
-    Args:
-        mask (sitk.Image): an SITK file object corresponding to a mask.
-        metadata_path (str): path to metadata template file.
-        file_paths (list[str]): list of DICOM file paths corresponding to the
-            original series.
-        output_dir (str): path to output directory.
-        output_file_name (str, optional): output file name. Defaults to
-            "prediction".
-
-    Returns:
-        str: "success" if the process was successful, "empty mask" if the SITK
-            mask contained no values.
-    """
-    rt_struct_output = f"{output_dir}/{output_file_name}.dcm"
-    logger.info(f"writing dicom struct to {rt_struct_output}")
-
-    mask_array = np.transpose(sitk.GetArrayFromImage(mask), [1, 2, 0])
-
-    with open(metadata_path.strip()) as o:
-        metadata = json.load(o)
-    segment_info = [
-        [
-            element["SegmentDescription"],
-            element["recommendedDisplayRGBValue"],
-        ]
-        for element in metadata["segmentAttributes"][0]
-    ]
-
-    save_mask_as_rtstruct(
-        mask_array,
-        os.path.dirname(file_paths[0][0]),
-        output_path=rt_struct_output,
-        segment_info=segment_info,
-    )
-
     return "success"
 
 
@@ -835,15 +727,12 @@ def export_dicom_files(
     output_dir: str,
     prediction_name: str,
     probabilities_name: str,
-    struct_name: str,
     metadata_path: str,
     fractional_metadata_path: str,
     fractional_as_segments: bool,
     dicom_file_paths: list[str],
-    mask: sitk.Image,
     proba_map: sitk.Image,
     save_proba_map: bool,
-    save_rt_struct: bool,
     class_idx: int | None = None,
 ):
     """
@@ -890,15 +779,6 @@ def export_dicom_files(
             output_dir=output_dir,
             output_file_name=probabilities_name,
             fractional_as_segments=fractional_as_segments,
-        )
-
-    if save_rt_struct:
-        export_to_dicom_struct(
-            mask,
-            metadata_path=metadata_path,
-            file_paths=dicom_file_paths,
-            output_dir=output_dir,
-            output_file_name=struct_name,
         )
 
 
