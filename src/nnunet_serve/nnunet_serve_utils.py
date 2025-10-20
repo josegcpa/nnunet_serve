@@ -9,7 +9,7 @@ from typing import Union
 from glob import glob
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
-from utils.utils import (
+from nnunet_serve.utils import (
     Folds,
     resample_image_to_target,
     read_dicom_as_sitk,
@@ -31,8 +31,8 @@ from nnunetv2.utilities.helpers import empty_cache
 from nnunetv2.inference.sliding_window_prediction import compute_gaussian
 
 
-from utils.logging_utils import get_logger
-from utils.seg_writers import SegWriter
+from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.seg_writers import SegWriter
 from typing import Any
 
 logger = get_logger(__name__)
@@ -507,17 +507,20 @@ def predict(
     }
     export_params = {k: params[k] for k in params if k in export_param_names}
 
-    all_predictions, all_proba_maps, good_file_paths = multi_model_inference(
-        series_paths=series_paths,
-        predictor=predictor,
-        nnunet_path=nnunet_path,
-        **inference_params,
+    all_predictions, all_proba_maps, good_file_paths, all_volumes = (
+        multi_model_inference(
+            series_paths=series_paths,
+            predictor=predictor,
+            nnunet_path=nnunet_path,
+            **inference_params,
+        )
     )
 
     output_paths = export_predictions(
         masks=all_predictions,
         proba_maps=all_proba_maps,
         good_file_paths=good_file_paths,
+        volumes=all_volumes,
         metadata=metadata,
         **export_params,
     )
@@ -1060,7 +1063,7 @@ def multi_model_inference(
 
     logger.info("Finished inference")
 
-    return all_predictions, all_proba_maps, good_file_paths
+    return all_predictions, all_proba_maps, good_file_paths, all_volumes
 
 
 def export_predictions(

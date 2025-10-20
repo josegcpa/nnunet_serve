@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .nnunet_serve_utils import (
+from nnunet_serve.nnunet_serve_utils import (
     FAILURE_STATUS,
     SUCCESS_STATUS,
     get_info,
@@ -29,7 +29,7 @@ from .nnunet_serve_utils import (
     predict,
     InferenceRequest,
 )
-from .logging_utils import get_logger
+from nnunet_serve.logging_utils import get_logger
 
 torch.serialization.add_safe_globals(
     [
@@ -43,6 +43,7 @@ torch.serialization.add_safe_globals(
 origins = ["http://localhost:8404"]
 
 logger = get_logger(__name__)
+
 
 @dataclass
 class nnUNetAPI:
@@ -249,8 +250,10 @@ def get_model_dictionary():
         k = model_spec["id"]
         output_model_dictionary[k] = model_dictionary[m]
         output_model_dictionary[k].update(model_spec)
-    logger.info("Model dictionary: %s", output_model_dictionary)
-    logger.info("Alias dictionary: %s", alias_dict)
+    for k in output_model_dictionary:
+        logger.debug("Model dictionary: %s=%s", k, output_model_dictionary[k])
+    for k in alias_dict:
+        logger.debug("Alias dictionary: %s=%s", k, alias_dict[k])
     return output_model_dictionary, alias_dict
 
 
@@ -271,5 +274,8 @@ def create_app():
 
 if __name__ == "__main__":
     uvicorn.run(
-        "utils.nnunet_serve:create_app", host="0.0.0.0", port=12345, reload=True
+        "nnunet_serve.nnunet_serve:create_app",
+        host="0.0.0.0",
+        port=12345,
+        reload=True,
     )

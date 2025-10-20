@@ -7,8 +7,8 @@ import argparse
 from glob import glob
 from pydicom import dcmread
 from scipy import ndimage
-from .seg_writers import SegWriter
-from .logging_utils import get_logger
+from nnunet_serve.seg_writers import SegWriter
+from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
