@@ -37,10 +37,6 @@ logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
 FAILURE_STATUS = "failed"
 
-for k in ["nnUNet_preprocessed", "nnUNet_raw", "nnUNet_results"]:
-    dir = "tmp" if k != "nnUNet_preprocessed" else "tmp/preproc"
-    os.environ[k] = os.environ.get(k, dir)
-
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
 
 
