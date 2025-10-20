@@ -1,3 +1,7 @@
+"""
+Utilities for writing segmentations.
+"""
+
 import logging
 import random
 import re

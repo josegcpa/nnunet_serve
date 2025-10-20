@@ -1,6 +1,5 @@
 """
-Implementation of a simple nnUNet server API. This is helpful for quicker
-inference as models can be pre-loaded. 
+Implementation of a nnUNet server API. 
 
 Depends on ``model-serve-spec.yaml`` which should be specified in the directory
 where nnunet_serve is utilized.
@@ -21,11 +20,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.nnunet_serve_utils import (FAILURE_STATUS, SUCCESS_STATUS,
-                                             InferenceRequest,
-                                             get_default_params, get_info,
-                                             get_series_paths, predict,
-                                             wait_for_gpu)
+from nnunet_serve.nnunet_serve_utils import (
+    FAILURE_STATUS,
+    SUCCESS_STATUS,
+    InferenceRequest,
+    get_default_params,
+    get_info,
+    get_series_paths,
+    predict,
+    wait_for_gpu,
+)
 
 torch.serialization.add_safe_globals(
     [

@@ -1,3 +1,7 @@
+"""
+Utilities for nnU-Net model serving.
+"""
+
 import json
 import os
 import subprocess as sp
@@ -501,13 +505,16 @@ def predict(
     }
     export_params = {k: params[k] for k in params if k in export_param_names}
 
-    all_predictions, all_proba_maps, good_file_paths, all_volumes = (
-        multi_model_inference(
-            series_paths=series_paths,
-            predictor=predictor,
-            nnunet_path=nnunet_path,
-            **inference_params,
-        )
+    (
+        all_predictions,
+        all_proba_maps,
+        good_file_paths,
+        all_volumes,
+    ) = multi_model_inference(
+        series_paths=series_paths,
+        predictor=predictor,
+        nnunet_path=nnunet_path,
+        **inference_params,
     )
 
     output_paths = export_predictions(

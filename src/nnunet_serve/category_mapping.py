@@ -1,3 +1,7 @@
+"""
+Maps type or modifier concepts to SNOMED CT category codes.
+"""
+
 CATEGORY_MAPPING = {
     "type": {
         "248300009": "85756007",
