@@ -1,16 +1,13 @@
 import argparse
-import json
 import os
 from glob import glob
 
 import numpy as np
-import pydicom_seg
 import SimpleITK as sitk
 from pydicom import dcmread
 from scipy import ndimage
 
 from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.seg_writers import SegWriter
 
 logger = get_logger(__name__)
 
@@ -422,44 +419,6 @@ def get_study_uid(dicom_dir: str) -> str:
     return dcmread(dcm_files[0])[(0x0020, 0x000D)].value
 
 
-def export_to_dicom_seg(
-    mask: sitk.Image,
-    metadata: dict[str, str],
-    file_paths: Sequence[Sequence[str]],
-    output_dir: str,
-    output_file_name: str = "prediction",
-    is_fractional: bool = False,
-) -> str:
-    """
-    Exports a SITK image mask as a DICOM segmentation object.
-
-    Args:
-        mask (sitk.Image): an SITK file object corresponding to a mask.
-        metadata (dict[str, str]): metadata template.
-        file_paths (Sequence[str]): list of DICOM file paths corresponding to the
-            original series.
-        output_dir (str): path to output directory.
-        output_file_name (str, optional): output file name. Defaults to
-            "prediction".
-        is_fractional (bool, optional): whether the mask is fractional. Defaults to
-            False.
-
-    Returns:
-        str: "success" if the process was successful, "empty mask" if the SITK
-            mask contained no values.
-    """
-    seg_writer = SegWriter.init_from_metadata_dict(metadata)
-    output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
-    seg_writer.write_dicom_seg(
-        mask,
-        file_paths[0],
-        output_dcm_path,
-        is_fractional=is_fractional,
-    )
-    logger.info(f"writing dicom output to {output_dcm_path}")
-    return "success"
-
-
 def export_to_dicom_seg_dcmqi(
     mask_path: str,
     metadata_path: str,
@@ -663,66 +622,6 @@ def export_mask(
     sitk.WriteImage(mask, output_mask)
 
     return mask, empty
-
-
-def export_fractional_dicom_seg(
-    proba_map: sitk.Image,
-    metadata_path: str,
-    file_paths: Sequence[Sequence[str]],
-    output_dir: str,
-    output_file_name: str = "probabilities",
-    fractional_as_segments: bool = False,
-):
-    """
-    Exports a SITK image mask as a fractional DICOM segmentation object.
-
-    Args:
-        mask (sitk.Image): an SITK file object corresponding to a mask.
-        metadata_path (str): path to metadata template file.
-        file_paths (list[str]): list of DICOM file paths corresponding to the
-            original series.
-        output_dir (str): path to output directory.
-        output_file_name (str, optional): output file name. Defaults to
-            "probabilities".
-        fractional_as_segments (bool, optional): discretizes the fractional
-            probabilities into segments. The number of segments is the number
-            of segmentAttributes in metadata_path. Defaults to False.
-
-    Returns:
-        str: "success" if the process was successful, "empty mask" if the SITK
-            mask contained no values.
-    """
-    if fractional_as_segments is False:
-        from pydicom_seg_writers import FractionalWriter
-
-        metadata_template = pydicom_seg.template.from_dcmqi_metainfo(
-            metadata_path.strip()
-        )
-        writer = FractionalWriter(
-            template=metadata_template,
-            skip_empty_slices=True,
-            skip_missing_segment=False,
-        )
-
-        dcm = writer.write(proba_map, file_paths[0])
-        output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
-        logger.info(f"writing dicom output to {output_dcm_path}")
-        dcm.save_as(output_dcm_path)
-    else:
-        with open(metadata_path) as o:
-            n_segments = len(json.load(o)["segmentAttributes"][0])
-        proba_map = sitk.Cast(proba_map * n_segments, sitk.sitkInt32)
-        tmp_proba_path = f"{output_dir}/discrete_probabilities.nii.gz"
-        sitk.WriteImage(proba_map, tmp_proba_path)
-        export_to_dicom_seg_dcmqi(
-            mask_path=tmp_proba_path,
-            metadata_path=metadata_path,
-            file_paths=file_paths,
-            output_dir=output_dir,
-            output_file_name=output_file_name,
-        )
-
-    return "success"
 
 
 def export_dicom_files(
