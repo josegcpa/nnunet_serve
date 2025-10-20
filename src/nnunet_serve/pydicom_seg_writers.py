@@ -5,14 +5,11 @@ from typing import List, Union
 import numpy as np
 import pydicom
 import SimpleITK as sitk
-
 from pydicom_seg import writer_utils
 from pydicom_seg.dicom_utils import DimensionOrganizationSequence
-from pydicom_seg.segmentation_dataset import (
-    SegmentationDataset,
-    SegmentationFractionalType,
-    SegmentationType,
-)
+from pydicom_seg.segmentation_dataset import (SegmentationDataset,
+                                              SegmentationFractionalType,
+                                              SegmentationType)
 from pydicom_seg.typing import FSPath
 
 logger = logging.getLogger(__name__)

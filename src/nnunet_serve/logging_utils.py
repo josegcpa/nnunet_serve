@@ -21,7 +21,7 @@ def get_logger(log_name: str):
         logging.Logger: The logger.
     """
     logger = logging.getLogger(log_name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(os.environ.get("NNUNET_SERVE_LOGGING_LEVEL", logging.INFO))
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)

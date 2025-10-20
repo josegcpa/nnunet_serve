@@ -1,15 +1,11 @@
-import os
-import SimpleITK as sitk
-import time
-import requests
 import json
+import os
+import time
 
-from utils import (
-    export_proba_map_and_mask,
-    export_dicom_files,
-    make_parser,
-)
+import requests
+import SimpleITK as sitk
 from entrypoint import main
+from utils import export_dicom_files, export_proba_map_and_mask, make_parser
 
 
 class Timer:

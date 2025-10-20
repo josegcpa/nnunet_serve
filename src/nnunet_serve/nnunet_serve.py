@@ -6,30 +6,26 @@ Depends on ``model-serve-spec.yaml`` which should be specified in the directory
 where nnunet_serve is utilized.
 """
 
-import time
-import re
 import os
-import yaml
-import numpy as np
-import fastapi
-import uvicorn
-import torch
+import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+import fastapi
+import numpy as np
+import torch
+import uvicorn
+import yaml
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from nnunet_serve.nnunet_serve_utils import (
-    FAILURE_STATUS,
-    SUCCESS_STATUS,
-    get_info,
-    get_default_params,
-    get_series_paths,
-    wait_for_gpu,
-    predict,
-    InferenceRequest,
-)
 from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.nnunet_serve_utils import (FAILURE_STATUS, SUCCESS_STATUS,
+                                             InferenceRequest,
+                                             get_default_params, get_info,
+                                             get_series_paths, predict,
+                                             wait_for_gpu)
 
 torch.serialization.add_safe_globals(
     [

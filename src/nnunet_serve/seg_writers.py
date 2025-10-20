@@ -1,18 +1,20 @@
-import re
-import random
 import logging
+import random
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
 import highdicom as hd
 import numpy as np
 import pydicom
 import pydicom_seg
 import SimpleITK as sitk
-from tqdm import tqdm
-from pathlib import Path
-from dataclasses import dataclass
-from pydicom.sr.codedict import codes, Code
 from pydicom.sr._concepts_dict import concepts as CONCEPTS
-from nnunet_serve.logging_utils import get_logger
+from pydicom.sr.codedict import Code, codes
+from tqdm import tqdm
+
 from nnunet_serve.category_mapping import CATEGORY_MAPPING
+from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

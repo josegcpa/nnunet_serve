@@ -1,47 +1,45 @@
+import json
 import os
 import subprocess as sp
-import json
+from enum import Enum
+from glob import glob
+from typing import Any, Union
+
 import numpy as np
 import SimpleITK as sitk
 import torch
-from typing import Union
-
-from glob import glob
-from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
-from nnunet_serve.utils import (
-    Folds,
-    resample_image_to_target,
-    read_dicom_as_sitk,
-    extract_lesion_candidates,
-    copy_information_nd,
-    intersect,
-)
+from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from batchgenerators.dataloading.multi_threaded_augmenter import (
     MultiThreadedAugmenter,
 )
-from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from nnunetv2.configuration import default_num_processes
+from nnunetv2.inference.sliding_window_prediction import compute_gaussian
+from nnunetv2.utilities.helpers import empty_cache
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
 from nnunetv2.utilities.plans_handling.plans_handler import (
-    PlansManager,
     ConfigurationManager,
+    PlansManager,
 )
-from nnunetv2.utilities.helpers import empty_cache
-from nnunetv2.inference.sliding_window_prediction import compute_gaussian
-
+from pydantic import BaseModel, ConfigDict, Field
 
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter
-from typing import Any
+from nnunet_serve.utils import (
+    Folds,
+    copy_information_nd,
+    extract_lesion_candidates,
+    intersect,
+    read_dicom_as_sitk,
+    resample_image_to_target,
+)
 
 logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
 FAILURE_STATUS = "failed"
 
-os.environ["nnUNet_preprocessed"] = "tmp/preproc"
-os.environ["nnUNet_raw"] = "tmp"
-os.environ["nnUNet_results"] = "tmp"
+for k in ["nnUNet_preprocessed", "nnUNet_raw", "nnUNet_results"]:
+    dir = "tmp" if k != "nnUNet_preprocessed" else "tmp/preproc"
+    os.environ[k] = os.environ.get(k, dir)
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
 

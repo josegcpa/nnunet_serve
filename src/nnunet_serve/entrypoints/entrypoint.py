@@ -4,18 +4,14 @@ or DICOM format.
 """
 
 import os
-import SimpleITK as sitk
-import torch
 import random
 from glob import glob
-from utils import (
-    resample_image_to_target,
-    read_dicom_as_sitk,
-    get_study_uid,
-    export_dicom_files,
-    export_proba_map_and_mask,
-    make_parser,
-)
+
+import SimpleITK as sitk
+import torch
+from utils import (export_dicom_files, export_proba_map_and_mask,
+                   get_study_uid, make_parser, read_dicom_as_sitk,
+                   resample_image_to_target)
 
 
 def main(

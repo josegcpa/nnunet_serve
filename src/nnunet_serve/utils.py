@@ -1,14 +1,16 @@
-import os
-import numpy as np
-import SimpleITK as sitk
-import pydicom_seg
-import json
 import argparse
+import json
+import os
 from glob import glob
+
+import numpy as np
+import pydicom_seg
+import SimpleITK as sitk
 from pydicom import dcmread
 from scipy import ndimage
-from nnunet_serve.seg_writers import SegWriter
+
 from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.seg_writers import SegWriter
 
 logger = get_logger(__name__)
 
