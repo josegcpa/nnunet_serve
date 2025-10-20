@@ -17,6 +17,8 @@ dependencies = [
     "highdicom>=0.23",
     "rt-utils>=1.2.7",
     "ruff>=0.14.1",
+    "isort>=7.0.0",
+    "pre-commit>=4.3.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
