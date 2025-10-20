@@ -4,21 +4,18 @@ import json
 import numpy as np
 import SimpleITK as sitk
 import torch
-from copy import deepcopy
 from typing import Union
 
 from glob import glob
+from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
-from .utils import (
+from utils.utils import (
     Folds,
     resample_image_to_target,
     read_dicom_as_sitk,
-    export_to_dicom_seg,
-    export_to_dicom_struct,
     extract_lesion_candidates,
     copy_information_nd,
     intersect,
-    export_fractional_dicom_seg,
 )
 from batchgenerators.dataloading.multi_threaded_augmenter import (
     MultiThreadedAugmenter,
@@ -31,13 +28,11 @@ from nnunetv2.utilities.plans_handling.plans_handler import (
     ConfigurationManager,
 )
 from nnunetv2.utilities.helpers import empty_cache
-from nnunetv2.inference.export_prediction import (
-    convert_predicted_logits_to_segmentation_with_correct_shape,
-)
 from nnunetv2.inference.sliding_window_prediction import compute_gaussian
 
 
-from .logging_utils import get_logger
+from utils.logging_utils import get_logger
+from utils.seg_writers import SegWriter
 from typing import Any
 
 logger = get_logger(__name__)
@@ -49,6 +44,11 @@ os.environ["nnUNet_raw"] = "tmp"
 os.environ["nnUNet_results"] = "tmp"
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
+
+
+class CascadeMode(Enum):
+    INTERSECT = "intersect"
+    CROP = "crop"
 
 
 class InferenceRequest(BaseModel):
@@ -113,11 +113,10 @@ class InferenceRequest(BaseModel):
     crop_padding: tuple[int, int, int] | None = Field(
         description="Padding to be added to the cropped region", default=None
     )
-    cascade_mode: str | None = Field(
+    cascade_mode: CascadeMode = Field(
         description="Whether to crop inputs to consecutive bounding boxes "
         "or to intersect consecutive outputs.",
-        default="intersect",
-        choices=["intersect", "crop", None],
+        default=CascadeMode.INTERSECT,
     )
     save_proba_map: bool = Field(
         description="Saves the probability map", default=False
@@ -132,6 +131,14 @@ class InferenceRequest(BaseModel):
     suffix: str | None = Field(
         description="Suffix for predictions", default=None
     )
+
+    def model_post_init(self, context):
+        if self.save_proba_map and all(
+            [x is None for x in self.proba_threshold]
+        ):
+            raise ValueError(
+                "proba_threshold must be not-None if save_proba_map is True"
+            )
 
 
 def convert_predicted_logits_to_segmentation_with_correct_shape(
@@ -232,6 +239,7 @@ def predict_from_data_iterator_local(
         properties = preprocessed["data_properties"]
 
         prediction = predictor.predict_logits_from_preprocessed_data(data).cpu()
+        n_classes = prediction.shape[0]
         logger.info("nnUNet: predicted logits")
         if class_idx is not None:
             old_labels = predictor.label_manager._all_labels
@@ -262,9 +270,31 @@ def predict_from_data_iterator_local(
                 save_probabilities,
             )
         )
+        if class_idx is not None:
+            if save_probabilities is False:
+                corrected_mask = np.zeros_like(processed_output)
+                for i, label in enumerate(used_labels[1:]):
+                    corrected_mask = np.where(
+                        processed_output[i] == i + 1,
+                        label,
+                        corrected_mask,
+                    )
+            else:
+                corrected_mask = np.zeros_like(processed_output[0])
+                corrected_prob = np.zeros(
+                    [n_classes, *processed_output[0].shape]
+                )
+                for i, label in enumerate(used_labels[1:]):
+                    corrected_mask = np.where(
+                        processed_output[i] == i + 1,
+                        label,
+                        corrected_mask,
+                    )
+                    corrected_prob[label] = processed_output[i]
+
         logger.info("nnUNet: converted logits to segmentation")
         ret.append(processed_output)
-        logger.info(f"\nDone with image of shape {data.shape}:")
+        logger.info(f"Done with image of shape {data.shape}")
         predictor.label_manager._all_labels = old_labels
         predictor.label_manager._regions = old_regions
 
@@ -407,7 +437,7 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
 
 def predict(
     series_paths: list,
-    metadata_path: str,
+    metadata: str,
     mirroring: bool,
     device_id: int,
     params: dict,
@@ -418,7 +448,9 @@ def predict(
 
     Args:
         series_paths (list): paths to series.
-        metadata_path (str): path to DICOM seg metadata.
+        metadata (str): DICOM seg metadata. Has to be a dict with either "path"
+            (pointing towards a DCMQI metadata file) or a list of metadata
+            key-value pairs (please see ``SegWriter`` for details).
         mirroring (bool): whether to use mirroring during inference.
         device_id (int): GPU identifier.
         params (dict): parameters which will be used in wraper.
@@ -483,10 +515,10 @@ def predict(
     )
 
     output_paths = export_predictions(
-        all_predictions,
-        all_proba_maps,
-        good_file_paths,
-        metadata_path,
+        masks=all_predictions,
+        proba_maps=all_proba_maps,
+        good_file_paths=good_file_paths,
+        metadata=metadata,
         **export_params,
     )
 
@@ -566,6 +598,7 @@ def get_crop(
         target_image_size[1] - bounding_box[4],
         target_image_size[2] - bounding_box[5],
     ]
+    output_padding = list(map(int, output_padding))
     return bounding_box, output_padding
 
 
@@ -668,12 +701,12 @@ def process_proba_array(
         empty = True
     if output_padding is not None:
         pad_filter = sitk.ConstantPadImageFilter()
-        pad_filter.SetPadLowerBound([i - 1 for i in output_padding[:3]])
-        pad_filter.SetPadUpperBound([i + 1 for i in output_padding[3:]])
+        pad_filter.SetPadLowerBound(output_padding[:3])
+        pad_filter.SetPadUpperBound(output_padding[3:])
         mask = pad_filter.Execute(mask)
         proba_map = pad_filter.Execute(proba_map)
 
-    return proba_map, mask, empty
+    return mask, proba_map, empty
 
 
 def process_mask(
@@ -707,22 +740,21 @@ def process_mask(
     """
     logger.info("Exporting mask")
     empty = False
+    if intersect_with is not None:
+        mask_array = intersect(mask_array, intersect_with, min_intersection)
     mask = sitk.GetImageFromArray(mask_array)
     mask.CopyInformation(input_image)
     mask_stats = sitk.LabelShapeStatisticsImageFilter()
     mask_stats.Execute(mask)
-    if intersect_with is not None:
-        mask = intersect(mask, intersect_with, min_intersection)
-    print(mask_stats.GetLabels())
+    logger.info("Labels: %s", mask_stats.GetLabels())
     if len(mask_stats.GetLabels()) == 0:
         logger.warning("Mask is empty")
         empty = True
     if output_padding is not None:
         pad_filter = sitk.ConstantPadImageFilter()
-        pad_filter.SetPadLowerBound([i - 1 for i in output_padding[:3]])
-        pad_filter.SetPadUpperBound([i + 1 for i in output_padding[3:]])
+        pad_filter.SetPadLowerBound(output_padding[:3])
+        pad_filter.SetPadUpperBound(output_padding[3:])
         mask = pad_filter.Execute(mask)
-
     return mask, empty
 
 
@@ -800,11 +832,11 @@ def single_model_inference(
     if len(predictor.dataset_json["channel_names"]) != len(volumes):
         exp_chan = predictor.dataset_json["channel_names"]
         raise ValueError(
-            f"series_paths should have length {len(exp_chan)} ({exp_chan}) but has length {len(series)}"
+            f"series_paths should have length {len(exp_chan)} ({exp_chan}) but has length {len(volumes)}"
         )
     output_padding = None
     if crop_from is not None:
-        logger.info(f"Cropping input")
+        logger.info("Cropping input")
         bb, output_padding = get_crop(
             crop_from, volumes[0], crop_padding, patch_size[::-1]
         )
@@ -830,25 +862,20 @@ def single_model_inference(
         [input_array], None, [image_properties], None, 1
     )
     logger.info("nnUNet: running inference")
-    prediction = predict_from_data_iterator_local(
+    mask_array, proba_array = predict_from_data_iterator_local(
         predictor, iterator, save_probabilities=True, class_idx=class_idx
-    )
+    )[0]
     logger.info("nnUNet: inference done")
-    if proba_threshold is not None:
-        mask_array, proba_array = prediction
-    else:
-        mask_array, proba_array = prediction, None
 
-    if proba_array is not None:
-        mask, _ = process_proba_array(
+    if proba_threshold is not None:
+        mask, probability_map, _ = process_proba_array(
             proba_array,
             volumes[0],
-            output_dir=output_dir,
             min_confidence=min_confidence,
             proba_threshold=proba_threshold,
             intersect_with=intersect_with,
             min_intersection=min_overlap,
-            class_idx=[i for i in range(1, len(class_idx) + 1)],
+            class_idx=class_idx,
             output_padding=output_padding,
         )
     else:
@@ -858,7 +885,6 @@ def single_model_inference(
             intersect_with=intersect_with,
             min_intersection=min_overlap,
             output_padding=output_padding,
-            class_idx=[i for i in range(1, len(class_idx) + 1)],
         )
         probability_map = None
 
@@ -1045,7 +1071,7 @@ def export_predictions(
     good_file_paths: list[str] | None = None,
     suffix: str | None = None,
     is_dicom: bool = False,
-    metadata_path: str | None = None,
+    metadata: dict[str, str] | None = None,
     save_proba_map: bool = False,
     save_nifti_inputs: bool = False,
     save_rt_struct_output: bool = False,
@@ -1061,75 +1087,113 @@ def export_predictions(
     }
 
     output_paths = {}
+    stage_dirs = [
+        os.path.join(output_dir, f"stage_{i}") for i in range(len(masks))
+    ]
+    for stage_dir in stage_dirs:
+        os.makedirs(stage_dir, exist_ok=True)
 
+    if is_dicom is True:
+        if metadata is None:
+            raise ValueError("metadata must be defined when is_dicom is True")
+        seg_writer = SegWriter.init_from_metadata_dict(metadata)
+
+    mask_paths = []
     for i, mask in enumerate(masks):
-        output_paths[f"nifti_prediction_{i}"] = (
-            f"{output_dir}/stage_{i}/{output_names['prediction']}.nii.gz"
+        output_nifti_path = (
+            f"{stage_dirs[i]}/{output_names['prediction']}.nii.gz"
         )
-        sitk.WriteImage(mask, output_paths[f"nifti_prediction_{i}"])
+        sitk.WriteImage(mask, output_nifti_path)
+        mask_paths.append(output_nifti_path)
+        logger.info("Exported prediction mask %d to %s", i, output_nifti_path)
+    output_paths["nifti_prediction"] = mask_paths
 
-    for i, proba_map in enumerate(proba_maps):
-        output_paths[f"nifti_probabilities_{i}"] = (
-            f"{output_dir}/stage_{i}/{output_names['probabilities']}.nii.gz"
-        )
-        sitk.WriteImage(proba_map, output_paths[f"nifti_probabilities_{i}"])
+    if save_proba_map is True:
+        proba_map_paths = []
+        for i, proba_map in enumerate(proba_maps):
+            output_nifti_path = (
+                f"{stage_dirs[i]}/{output_names['probabilities']}.nii.gz"
+            )
+            sitk.WriteImage(proba_map, output_nifti_path)
+            proba_map_paths.append(output_nifti_path)
+            logger.info(
+                "Exported probability map %d to %s", i, output_nifti_path
+            )
+        output_paths["nifti_proba"] = proba_map_paths
 
     if save_nifti_inputs is True:
         niftis = []
         for i, volume_set in enumerate(volumes):
-            curr_stage = Path(f"{output_dir}/stage_{i}").mkdir(exist_ok=True)
             for volume in volume_set:
-                output_nifti = curr_stage / Path(volume).name
-                logger.info(f"Copying Nifti to {output_nifti}")
-                sitk.WriteImage(volume, output_nifti)
-                niftis.append(output_nifti)
+                output_nifti_path = os.path.join(
+                    stage_dirs[i], "input_volume.nii.gz"
+                )
+                sitk.WriteImage(volume, output_nifti_path)
+                niftis.append(output_nifti_path)
+                logger.info(
+                    "Exported input volume %d to %s", i, output_nifti_path
+                )
         output_paths["nifti_inputs"] = niftis
 
     if is_dicom is True:
-        if metadata_path is None:
-            raise ValueError(
-                "if is_dicom is True metadata_path must be specified"
-            )
+        if metadata is None:
+            raise ValueError("if is_dicom is True metadata must be specified")
+        dicom_seg_paths = []
+        dicom_struct_paths = []
         for i, mask in enumerate(masks):
-            status = export_to_dicom_seg(
+            dcm_seg_output_path = (
+                f"{stage_dirs[i]}/{output_names['prediction']}.dcm"
+            )
+            status = seg_writer.write_dicom_seg(
                 mask,
-                metadata_path=metadata_path,
-                file_paths=good_file_paths,
-                output_dir=f"{output_dir}/stage_{i}",
-                output_file_name=output_names["prediction"],
+                source_files=good_file_paths[0],
+                output_path=dcm_seg_output_path,
             )
             if "empty" in status:
-                logger.info("Mask is empty, skipping DICOMseg/RTstruct")
+                logger.info("Mask %d is empty, skipping DICOMseg/RTstruct", i)
             elif save_rt_struct_output:
-                export_to_dicom_struct(
+                dcm_rts_output_path = (
+                    f"{stage_dirs[i]}/{output_names['struct']}.dcm"
+                )
+                status = seg_writer.write_dicom_rtstruct(
                     mask,
-                    metadata_path=metadata_path,
-                    file_paths=good_file_paths,
-                    output_dir=f"{output_dir}/stage_{i}",
-                    output_file_name=output_names["struct"],
+                    source_files=good_file_paths[0],
+                    output_path=dcm_rts_output_path,
                 )
-                output_paths["dicom_struct"] = (
-                    f"{output_dir}/stage_{i}/{output_names['struct']}.dcm"
-                )
-                output_paths["dicom_segmentation"] = (
-                    f"{output_dir}/stage_{i}/{output_names['prediction']}.dcm"
+                dicom_seg_paths.append(dcm_seg_output_path)
+                dicom_struct_paths.append(dcm_rts_output_path)
+                logger.info(
+                    "Exported DICOM struct %d to %s", i, dicom_struct_paths[-1]
                 )
             else:
-                output_paths["dicom_segmentation"] = (
-                    f"{output_dir}/stage_{i}/{output_names['prediction']}.dcm"
+                dicom_seg_paths.append(dcm_seg_output_path)
+                logger.info(
+                    "Exported DICOM segmentation %d to %s",
+                    i,
+                    dicom_seg_paths[-1],
                 )
+        output_paths["dicom_segmentation"] = dicom_seg_paths
+        if save_rt_struct_output:
+            output_paths["dicom_struct"] = dicom_struct_paths
 
         if save_proba_map is True:
+            dicom_proba_paths = []
             for i, proba_map in enumerate(proba_maps):
-                export_fractional_dicom_seg(
+                output_path = (
+                    f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
+                )
+                seg_writer.write_dicom_seg(
                     proba_map,
-                    metadata_path=metadata_path,
-                    file_paths=good_file_paths,
-                    output_dir=f"{output_dir}/stage_{i}",
-                    output_file_name=output_names["probabilities"],
+                    source_files=good_file_paths[0],
+                    output_path=output_path,
+                    is_fractional=True,
                 )
-                output_paths["dicom_fractional_segmentation"] = (
-                    f"{output_dir}/stage_{i}/{output_names['probabilities']}.dcm"
+                dicom_proba_paths.append(output_path)
+                logger.info(
+                    "Exported DICOM fractional segmentation %d to %s",
+                    i,
+                    dicom_proba_paths[-1],
                 )
+            output_paths["dicom_fractional_segmentation"] = dicom_proba_paths
 
     return output_paths
