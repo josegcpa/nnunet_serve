@@ -46,10 +46,14 @@ logger = get_logger(__name__)
 
 @dataclass
 class nnUNetAPI:
-    app: fastapi.FastAPI
+    app: fastapi.FastAPI | None = None
 
     def __post_init__(self):
         self.model_dictionary, self.alias_dict = get_model_dictionary()
+
+    def init_api(self):
+        if self.app is None:
+            raise ValueError("app must be defined before init_api is called")
         self.app.add_api_route("/infer", self.infer, methods=["POST"])
         self.app.add_api_route("/model_info", self.model_info, methods=["GET"])
         self.app.add_api_route(
@@ -65,7 +69,6 @@ class nnUNetAPI:
     def infer(self, inference_request: InferenceRequest):
         params = inference_request.__dict__
         nnunet_id = params["nnunet_id"]
-        # check if nnunet_id is a list
         if isinstance(nnunet_id, str):
             if nnunet_id not in self.alias_dict:
                 return JSONResponse(
@@ -73,7 +76,7 @@ class nnUNetAPI:
                         "time_elapsed": None,
                         "gpu": None,
                         "nnunet_path": None,
-                        "metadata_path": None,
+                        "metadata": None,
                         "request": inference_request.__dict__,
                         "status": FAILURE_STATUS,
                         "error": f"{nnunet_id} is not a valid nnunet_id",
@@ -95,7 +98,7 @@ class nnUNetAPI:
                             "time_elapsed": None,
                             "gpu": None,
                             "nnunet_path": None,
-                            "metadata_path": None,
+                            "metadata": None,
                             "request": inference_request.__dict__,
                             "status": FAILURE_STATUS,
                             "error": f"{nn} is not a valid nnunet_id",
@@ -108,7 +111,7 @@ class nnUNetAPI:
                 if curr_min_mem > min_mem:
                     min_mem = curr_min_mem
                 default_args.append(nnunet_info.get("default_args", {}))
-        metadata_path = nnunet_info.get("metadata", None)
+        metadata = nnunet_info.get("metadata", None)
         default_params = get_default_params(default_args)
 
         # assign
@@ -131,7 +134,7 @@ class nnUNetAPI:
                     "time_elapsed": None,
                     "gpu": None,
                     "nnunet_path": None,
-                    "metadata_path": None,
+                    "metadata": None,
                     "status": FAILURE_STATUS,
                     "request": inference_request.__dict__,
                     "error": error_msg,
@@ -150,7 +153,7 @@ class nnUNetAPI:
         if os.environ.get("DEBUG", 0) == "1":
             output_paths = predict(
                 series_paths=series_paths,
-                metadata_path=metadata_path,
+                metadata=metadata,
                 mirroring=mirroring,
                 device_id=device_id,
                 params=params,
@@ -162,7 +165,7 @@ class nnUNetAPI:
             try:
                 output_paths = predict(
                     series_paths=series_paths,
-                    metadata_path=metadata_path,
+                    metadata=metadata,
                     mirroring=mirroring,
                     device_id=device_id,
                     params=params,
@@ -184,7 +187,7 @@ class nnUNetAPI:
             "time_elapsed": b - a,
             "gpu": device_id,
             "nnunet_path": nnunet_path,
-            "metadata_path": metadata_path,
+            "metadata": metadata,
             "request": inference_request.__dict__,
             "status": status,
             "error": error,
@@ -254,6 +257,7 @@ def get_model_dictionary():
 def create_app():
     app = fastapi.FastAPI()
     nnunet_api = nnUNetAPI(app)
+    nnunet_api.init_api()
 
     app.add_middleware(
         CORSMiddleware,
