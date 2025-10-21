@@ -53,6 +53,9 @@ class nnUNetAPI:
         self.model_dictionary, self.alias_dict = get_model_dictionary()
 
     def init_api(self):
+        """
+        Initializes the API.
+        """
         if self.app is None:
             raise ValueError("app must be defined before init_api is called")
         self.app.add_api_route("/infer", self.infer, methods=["POST"])
@@ -62,12 +65,33 @@ class nnUNetAPI:
         )
 
     def model_info(self):
+        """
+        Returns the model information.
+
+        Returns:
+            dict: Model information.
+        """
         return self.model_dictionary
 
     def request_params(self):
+        """
+        Returns the request parameters.
+
+        Returns:
+            dict: Request parameters.
+        """
         return InferenceRequest.model_json_schema()
 
     def infer(self, inference_request: InferenceRequest):
+        """
+        Performs inference.
+
+        Args:
+            inference_request (InferenceRequest): Inference request.
+
+        Returns:
+            JSONResponse: Inference response.
+        """
         params = inference_request.__dict__
         nnunet_id = params["nnunet_id"]
         if isinstance(nnunet_id, str):
@@ -88,8 +112,10 @@ class nnUNetAPI:
             nnunet_path = nnunet_info["path"]
             min_mem = nnunet_info.get("min_mem", 4000)
             default_args = nnunet_info.get("default_args", {})
+            metadata = nnunet_info.get("metadata", None)
         else:
             nnunet_path = []
+            metadata = []
             default_args = []
             min_mem = 0
             for nn in nnunet_id:
@@ -112,7 +138,7 @@ class nnUNetAPI:
                 if curr_min_mem > min_mem:
                     min_mem = curr_min_mem
                 default_args.append(nnunet_info.get("default_args", {}))
-        metadata = nnunet_info.get("metadata", None)
+                metadata.append(nnunet_info.get("metadata", None))
         default_params = get_default_params(default_args)
 
         # assign
@@ -196,15 +222,32 @@ class nnUNetAPI:
         }
         if status == FAILURE_STATUS:
             return JSONResponse(content=payload, status_code=500)
-        return payload
+        return JSONResponse(content=payload, status_code=200)
 
 
-def get_model_dictionary():
+def get_totalseg_dir(model_specs: dict):
+    weights_key = "TOTALSEG_WEIGHTS_PATH"
+    if weights_key in os.environ:
+        return os.environ[weights_key]
+    os.environ[weights_key] = os.path.join(
+        model_specs["model_folder"], "totalseg"
+    )
+    return os.environ[weights_key]
+
+
+def get_model_dictionary() -> tuple[dict, dict]:
+    """
+    Returns a dictionary of models and their paths.
+
+    Returns:
+        dict, dict: dictionary of models and their paths together with an alias dict.
+    """
     model_spec_path = os.environ.get(
         "MODEL_SERVE_SPEC", "model-serve-spec.yaml"
     )
     with open(model_spec_path) as o:
         models_specs = yaml.safe_load(o)
+    get_totalseg_dir(models_specs)
     alias_dict = {}
     for model in models_specs["models"]:
         k = model["id"]
@@ -257,7 +300,13 @@ def get_model_dictionary():
     return output_model_dictionary, alias_dict
 
 
-def create_app():
+def create_app() -> fastapi.FastAPI:
+    """
+    Creates a FastAPI application.
+
+    Returns:
+        fastapi.FastAPI: FastAPI application.
+    """
     app = fastapi.FastAPI()
     nnunet_api = nnUNetAPI(app)
     nnunet_api.init_api()
