@@ -13,6 +13,7 @@ import numpy as np
 import pydicom
 import pydicom_seg
 import SimpleITK as sitk
+from copy import deepcopy
 from pydicom.sr._concepts_dict import concepts as CONCEPTS
 from pydicom.sr.codedict import Code, codes
 from tqdm import tqdm
@@ -21,6 +22,21 @@ from nnunet_serve.category_mapping import CATEGORY_MAPPING
 from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def get_empty_segment(
+    algorithm_type, algorithm_identification, tracking_id: str
+):
+    return hd.seg.SegmentDescription(
+        segment_number=99,
+        segment_label="Empty segment",
+        segmented_property_category=codes.CID7150.PhysicalObject,
+        segmented_property_type=codes.CID7150.PhysicalObject,
+        algorithm_type=algorithm_type,
+        algorithm_identification=algorithm_identification,
+        tracking_uid=hd.UID(),
+        tracking_id=tracking_id,
+    )
 
 
 def random_color_generator():
@@ -41,8 +57,9 @@ def one_hot_encode(arr: np.ndarray, n_labels: int) -> np.ndarray:
         np.ndarray: one-hot encoded numpy array.
     """
     output_arr = np.zeros([*arr.shape, n_labels])
-    for i in range(n_labels):
-        output_arr[..., i] = arr == i
+    for i in range(1, n_labels + 1):
+        output_arr[..., i - 1] = arr == i
+    output_arr = output_arr
     return output_arr
 
 
@@ -108,7 +125,7 @@ class SegWriter:
     algorithm_name: str
     algorithm_version: str = "v1.0"
     algorithm_family: pydicom.sr.coding.Code = (
-        codes.cid7162.ArtificialIntelligence
+        codes.CID7162.ArtificialIntelligence
     )
     algorithm_type: hd.seg.SegmentAlgorithmTypeValues = (
         hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC
@@ -124,37 +141,44 @@ class SegWriter:
 
     def __post_init__(self):
         self.segment_descriptions = []
-        category_concepts = codes.cid7150.concepts
+        category_concepts = codes.CID7150.concepts
         self.algorithm_identification = hd.AlgorithmIdentificationSequence(
             name=self.algorithm_name,
             version=self.algorithm_version,
             family=self.algorithm_family,
         )
         for i, segment in enumerate(self.segment_names):
+            segment_dict = {}
             if isinstance(segment, dict):
-                segment_name = self.process_name(segment["name"])
-                segment_number = segment.get("number", i + 1)
-                segment_label = segment.get("label", segment["name"])
-                tracking_id = segment.get(
-                    "tracking_id", f"Segment{segment_number}_{segment_label}"
+                segment_dict["name"] = self.process_name(segment["name"])
+                segment_dict["number"] = segment.get("number", i + 1)
+                segment_dict["label"] = segment.get("label", segment["name"])
+                segment_dict["tracking_id"] = segment.get(
+                    "tracking_id",
+                    f"Segment{segment_dict['number']}_{segment_dict['label']}",
                 )
+                segment_dict["code"] = segment.get("code", None)
             elif isinstance(segment, str):
-                segment_name = self.process_name(segment)
-                segment_number = i + 1
-                segment_label = segment
-                tracking_id = f"Segment{segment_number}_{segment_label}"
+                segment_dict["name"] = self.process_name(segment)
+                segment_dict["number"] = i + 1
+                segment_dict["label"] = segment
+                segment_dict[
+                    "tracking_id"
+                ] = f"Segment{segment_dict['number']}_{segment_dict['label']}"
+                segment_dict["code"] = None
             else:
                 raise ValueError(f"Invalid segment: {segment}")
-            type_code_dict = CONCEPTS["SCT"][segment_name]
-            type_code_number = list(type_code_dict.keys())[0]
-            type_code_name, _ = type_code_dict[type_code_number]
+            if segment_dict["code"] is None:
+                type_code_dict = CONCEPTS["SCT"][segment_dict["name"]]
+                segment_dict["code"] = list(type_code_dict.keys())[0]
+                segment_dict["name"], _ = type_code_dict[segment_dict["code"]]
             type_code = Code(
-                value=type_code_number,
-                meaning=type_code_name,
+                value=segment_dict["code"],
+                meaning=segment_dict["name"],
                 scheme_designator="SCT",
             )
 
-            category_number = CATEGORY_MAPPING["type"][type_code.value]
+            category_number = CATEGORY_MAPPING["type"][str(type_code.value)]
             category_code = [
                 category_concepts[k]
                 for k in category_concepts
@@ -162,14 +186,14 @@ class SegWriter:
             ][0]
 
             segment_description = hd.seg.SegmentDescription(
-                segment_number=segment_number,
-                segment_label=segment_label,
+                segment_number=segment_dict["number"],
+                segment_label=segment_dict["label"],
                 segmented_property_category=category_code,
                 segmented_property_type=type_code,
                 algorithm_type=self.algorithm_type,
                 algorithm_identification=self.algorithm_identification,
                 tracking_uid=hd.UID(),
-                tracking_id=tracking_id,
+                tracking_id=segment_dict["tracking_id"],
             )
             self.segment_descriptions.append(segment_description)
 
@@ -194,11 +218,22 @@ class SegWriter:
         is_fractional: bool = False,
     ):
         mask_array = self.to_array_if_necessary(mask_array)
+        # adjust array size and segment descriptions to the scritly necessary
+        labels = np.unique(mask_array)
+        labels = labels[labels > 0]
+        if len(labels) == 0:
+            logging.warning("Mask is empty")
+            return "empty"
+        label_dict = {label: i + 1 for i, label in enumerate(labels)}
+        mask_array = np.vectorize(label_dict.get)(mask_array)
+        segment_descriptions = []
+        for i, label in enumerate(labels):
+            seg_d = deepcopy(self.segment_descriptions[label - 1])
+            seg_d.SegmentNumber = i + 1
+            segment_descriptions.append(seg_d)
 
         if len(mask_array.shape) != 4:
-            mask_array = one_hot_encode(
-                mask_array, len(self.segment_descriptions)
-            )
+            mask_array = one_hot_encode(mask_array, len(segment_descriptions))
         image_datasets = [hd.imread(str(f)) for f in source_files]
 
         if hasattr(image_datasets[0], "InstanceNumber"):
@@ -217,15 +252,12 @@ class SegWriter:
             raise Exception(
                 f"Mask shape {mask_array.shape} does not match image shape {frames}x{rows}x{cols}"
             )
-        if mask_array.shape[-1] != len(self.segment_descriptions):
+        if mask_array.shape[-1] != len(segment_descriptions):
             raise Exception(
-                f"Mask shape {mask_array.shape} does not match number of segments {len(self.segment_descriptions)}"
+                f"Mask shape {mask_array.shape} does not match number of segments {len(segment_descriptions)}"
             )
 
         # Create the Segmentation instance
-        segmented_objects_text = ", ".join(
-            [s.SegmentLabel for s in self.segment_descriptions]
-        )
         if is_fractional:
             seg_type = hd.seg.SegmentationTypeValues.FRACTIONAL
         else:
@@ -234,7 +266,7 @@ class SegWriter:
             source_images=image_datasets,
             pixel_array=mask_array,
             segmentation_type=seg_type,
-            segment_descriptions=self.segment_descriptions,
+            segment_descriptions=segment_descriptions,
             series_instance_uid=hd.UID(),
             series_number=999,
             sop_instance_uid=hd.UID(),
@@ -243,7 +275,7 @@ class SegWriter:
             manufacturer_model_name=self.manufacturer_model_name,
             software_versions=self.algorithm_version,
             device_serial_number="42",
-            series_description=f"Segmentation of {segmented_objects_text}",
+            series_description="Segmentation",
         )
         seg_dataset.ClinicalTrialSeriesID = self.clinical_trial_series_id
         seg_dataset.ClinicalTrialTimePointID = self.clinical_trial_time_point_id
@@ -294,7 +326,7 @@ class SegWriter:
             segment_names=segments,
             algorithm_name=algorithm_name,
             algorithm_version=algorithm_version,
-            algorithm_family=codes.cid7162.ArtificialIntelligence,
+            algorithm_family=codes.CID7162.ArtificialIntelligence,
             algorithm_type=algorithm_type,
             instance_number=1,
             series_number=999,
