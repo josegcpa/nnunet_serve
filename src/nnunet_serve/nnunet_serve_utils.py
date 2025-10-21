@@ -137,6 +137,7 @@ class InferenceRequest(BaseModel):
             raise ValueError(
                 "proba_threshold must be not-None if save_proba_map is True"
             )
+        self.cascade_mode = self.cascade_mode.value
 
 
 def convert_predicted_logits_to_segmentation_with_correct_shape(
@@ -245,6 +246,7 @@ def predict_from_data_iterator_local(
             if isinstance(class_idx, int):
                 class_idx = [class_idx]
             used_labels = [0, *class_idx]
+            correspondence_dict = {i: l for i, l in enumerate(used_labels)}
             prediction = prediction[[0, *class_idx]]
             if predictor.label_manager._has_regions:
                 new_regions = [
@@ -270,25 +272,19 @@ def predict_from_data_iterator_local(
         )
         if class_idx is not None:
             if save_probabilities is False:
-                corrected_mask = np.zeros_like(processed_output)
-                for i, label in enumerate(used_labels[1:]):
-                    corrected_mask = np.where(
-                        processed_output[i] == i + 1,
-                        label,
-                        corrected_mask,
-                    )
+                processed_output = np.vectorize(correspondence_dict.get)(
+                    processed_output
+                )
             else:
-                corrected_mask = np.zeros_like(processed_output[0])
+                corrected_mask = np.vectorize(correspondence_dict.get)(
+                    processed_output[0]
+                )
                 corrected_prob = np.zeros(
                     [n_classes, *processed_output[0].shape]
                 )
                 for i, label in enumerate(used_labels[1:]):
-                    corrected_mask = np.where(
-                        processed_output[i] == i + 1,
-                        label,
-                        corrected_mask,
-                    )
-                    corrected_prob[label] = processed_output[i]
+                    corrected_prob[label] = processed_output[1][i]
+                processed_output = (corrected_mask, corrected_prob)
 
         logger.info("nnUNet: converted logits to segmentation")
         ret.append(processed_output)
@@ -304,6 +300,25 @@ def predict_from_data_iterator_local(
     # clear device cache
     empty_cache(predictor.device)
     return ret
+
+
+def filter_labels(
+    image: sitk.Image, class_idx: int | list[int], binarize: bool = False
+) -> sitk.Image:
+    stats = sitk.LabelShapeStatisticsImageFilter()
+    all_labels = []
+    stats.Execute(image)
+    image = sitk.Cast(image, sitk.sitkLabelUInt16)
+    for label in stats.GetLabels():
+        all_labels.append(label)
+    if isinstance(class_idx, int):
+        class_idx = [class_idx]
+    mapping = {int(i): int(i) if i in class_idx else 0 for i in all_labels}
+    output = sitk.ChangeLabelLabelMap(image, mapping)
+    output = sitk.Cast(output, sitk.sitkUInt16)
+    if binarize:
+        output = sitk.Cast(output > 0, sitk.sitkInt16)
+    return output
 
 
 def get_gpu_memory() -> list[int]:
@@ -435,7 +450,7 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
 
 def predict(
     series_paths: list,
-    metadata: str,
+    metadata: str | None,
     mirroring: bool,
     device_id: int,
     params: dict,
@@ -505,6 +520,18 @@ def predict(
     }
     export_params = {k: params[k] for k in params if k in export_param_names}
 
+    if export_params["is_dicom"] is True:
+        if metadata is None:
+            raise ValueError("metadata must be defined when is_dicom is True")
+        if isinstance(metadata, list):
+            seg_writers = [
+                SegWriter.init_from_metadata_dict(m) for m in metadata
+            ]
+        else:
+            seg_writers = [SegWriter.init_from_metadata_dict(metadata)]
+    else:
+        seg_writers = None
+
     (
         all_predictions,
         all_proba_maps,
@@ -522,7 +549,7 @@ def predict(
         proba_maps=all_proba_maps,
         good_file_paths=good_file_paths,
         volumes=all_volumes,
-        metadata=metadata,
+        seg_writers=seg_writers,
         **export_params,
     )
 
@@ -543,17 +570,15 @@ def get_crop(
     Args:
         image (str | sitk.Image): input image.
         target_image (sitk.Image | None, optional): target image. Defaults to None.
-        crop_padding (tuple[int, int, int] | None, optional): padding to be added to the cropped region. Defaults to None.
-        min_size (tuple[int, int, int] | None, optional): minimum size of the cropped region. Defaults to None.
+        crop_padding (tuple[int, int, int] | None, optional): padding to be added to
+            the cropped region. Defaults to None.
+        min_size (tuple[int, int, int] | None, optional): minimum size of the cropped
+            region. Defaults to None.
 
     Returns:
         tuple[int, int, int, int, int, int]: bounding box of the label.
     """
-    class_idx = 1
     if isinstance(image, str):
-        if ":" in image:
-            image, class_idx = image.split(":")
-            class_idx = int(class_idx)
         image = sitk.ReadImage(image)
     if target_image is not None:
         # check if resampling is required
@@ -568,11 +593,11 @@ def get_crop(
                 image, target=target_image, is_label=True
             )
     target_image_size = target_image.GetSize()
-    image = image == class_idx
     labelimfilter = sitk.LabelShapeStatisticsImageFilter()
     labelimfilter.Execute(image)
-    bounding_box = labelimfilter.GetBoundingBox(class_idx)
+    bounding_box = labelimfilter.GetBoundingBox(1)
     start, size = bounding_box[:3], bounding_box[3:]
+
     if crop_padding is not None:
         for i in range(3):
             start[i] = max(start[i] - crop_padding[i], 0)
@@ -580,9 +605,7 @@ def get_crop(
     if min_size is not None:
         for i in range(3):
             if size[i] < min_size[i]:
-                new_start = max(
-                    bounding_box[i] - (min_size[i] - size[i]) // 2, 0
-                )
+                new_start = max(start[i] - (min_size[i] - size[i]) // 2, 0)
                 start[i] = new_start
                 size[i] = min_size[i]
 
@@ -774,7 +797,9 @@ def single_model_inference(
     proba_threshold: float | None = None,
     min_confidence: float | None = None,
     intersect_with: str | sitk.Image | None = None,
+    intersect_with_class_idx: int = 1,
     crop_from: str | sitk.Image | None = None,
+    crop_class_idx: int = 1,
     crop_padding: tuple[int, int, int] | None = None,
     min_overlap: float = 0.1,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
@@ -792,8 +817,6 @@ def single_model_inference(
             Defaults to "checkpoint_best.pth".
         tmp_dir (str, optional): directory where temporary outputs are stored.
             Defaults to ".tmp".
-        is_dicom (bool, optional): whether the input/output is DICOM. Defaults
-            to False.
         use_folds (Folds, optional): which folds from the nnUNet model will be
             used. Defaults to (0,).
         proba_threshold (float, optional): probability threshold to consider a
@@ -802,10 +825,13 @@ def single_model_inference(
             each detected object. Defaults to None.
         intersect_with (str | sitk.Image | None, optional): whether the
             prediction should intersect with a given object. Defaults to None.
+        intersect_with_class_idx (int | None, optional): class index for intersection.
+            Defaults to None.
         crop_from (str | sitk.Image | None, optional): whether the
             input should be cropped centered on a given mask object. If
             specified as a string, it can be either the path or the path:class_idx.
             Defaults to None.
+        crop_class_idx (int | None, optional): class index for cropping. Defaults to None.
         crop_padding (tuple[int, int, int] | None, optional): padding to be
             added to the cropped region. Defaults to None.
         min_overlap (float, optional): fraction of prediction which should
@@ -841,6 +867,7 @@ def single_model_inference(
     output_padding = None
     if crop_from is not None:
         logger.info("Cropping input")
+        crop_from = filter_labels(crop_from, crop_class_idx, True)
         bb, output_padding = get_crop(
             crop_from, volumes[0], crop_padding, patch_size[::-1]
         )
@@ -869,9 +896,13 @@ def single_model_inference(
     mask_array, proba_array = predict_from_data_iterator_local(
         predictor, iterator, save_probabilities=True, class_idx=class_idx
     )[0]
+    print(np.unique(mask_array))
     logger.info("nnUNet: inference done")
 
     if proba_threshold is not None:
+        intersect_with = filter_labels(
+            intersect_with, intersect_with_class_idx, True
+        )
         mask, probability_map, _ = process_proba_array(
             proba_array,
             volumes[0],
@@ -1008,6 +1039,8 @@ def multi_model_inference(
         all_volumes, all_good_file_paths = load_series(series_paths, is_dicom)
         all_predictions = []
         all_proba_maps = []
+        intersect_with_class_idx = 1
+        crop_class_idx = 1
         for i in range(len(nnunet_path)):
             if i == (len(nnunet_path) - 1):
                 out = output_dir
@@ -1025,8 +1058,10 @@ def multi_model_inference(
                 proba_threshold=proba_threshold[i],
                 min_confidence=min_confidence[i],
                 intersect_with=intersect_with,
+                intersect_with_class_idx=intersect_with_class_idx,
                 min_overlap=min_overlap,
                 crop_from=crop_from,
+                crop_class_idx=crop_class_idx,
                 crop_padding=crop_padding,
             )
             all_predictions.append(mask)
@@ -1035,19 +1070,22 @@ def multi_model_inference(
                 if cascade_mode == "intersect":
                     logger.info("Using mask for intersection")
                     intersect_with = mask
+                    intersect_with_class_idx = class_idx_list[i]
                 elif cascade_mode == "crop":
                     logger.info("Using mask for cropping")
                     crop_from = mask
+                    crop_class_idx = class_idx_list[i]
         # keep first from last predicted series to replicate previous behaviour
         if is_dicom:
             good_file_paths = [all_good_file_paths[series_paths[-1][0]]]
         else:
             good_file_paths = None
     else:
+        all_volumes, all_good_file_paths = load_series(series_paths, is_dicom)
         mask, proba_map = single_model_inference(
             predictor=predictor,
             nnunet_path=nnunet_path.strip(),
-            series_paths=series_paths,
+            volumes=all_volumes,
             checkpoint_name=checkpoint_name.strip(),
             output_dir=output_dir,
             tmp_dir=tmp_dir,
@@ -1075,7 +1113,7 @@ def export_predictions(
     good_file_paths: list[str] | None = None,
     suffix: str | None = None,
     is_dicom: bool = False,
-    metadata: dict[str, str] | None = None,
+    seg_writers: SegWriter | list[SegWriter] | None = None,
     save_proba_map: bool = False,
     save_nifti_inputs: bool = False,
     save_rt_struct_output: bool = False,
@@ -1096,11 +1134,6 @@ def export_predictions(
     ]
     for stage_dir in stage_dirs:
         os.makedirs(stage_dir, exist_ok=True)
-
-    if is_dicom is True:
-        if metadata is None:
-            raise ValueError("metadata must be defined when is_dicom is True")
-        seg_writer = SegWriter.init_from_metadata_dict(metadata)
 
     mask_paths = []
     for i, mask in enumerate(masks):
@@ -1140,15 +1173,13 @@ def export_predictions(
         output_paths["nifti_inputs"] = niftis
 
     if is_dicom is True:
-        if metadata is None:
-            raise ValueError("if is_dicom is True metadata must be specified")
         dicom_seg_paths = []
         dicom_struct_paths = []
         for i, mask in enumerate(masks):
             dcm_seg_output_path = (
                 f"{stage_dirs[i]}/{output_names['prediction']}.dcm"
             )
-            status = seg_writer.write_dicom_seg(
+            status = seg_writers[i].write_dicom_seg(
                 mask,
                 source_files=good_file_paths[0],
                 output_path=dcm_seg_output_path,
@@ -1159,7 +1190,7 @@ def export_predictions(
                 dcm_rts_output_path = (
                     f"{stage_dirs[i]}/{output_names['struct']}.dcm"
                 )
-                status = seg_writer.write_dicom_rtstruct(
+                status = seg_writers[i].write_dicom_rtstruct(
                     mask,
                     source_files=good_file_paths[0],
                     output_path=dcm_rts_output_path,
@@ -1186,7 +1217,7 @@ def export_predictions(
                 output_path = (
                     f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
                 )
-                seg_writer.write_dicom_seg(
+                seg_writers[i].write_dicom_seg(
                     proba_map,
                     source_files=good_file_paths[0],
                     output_path=output_path,
