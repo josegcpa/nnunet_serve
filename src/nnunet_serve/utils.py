@@ -36,6 +36,8 @@ def float_or_none(x: str) -> float | None:
 
 
 def int_or_list_of_ints(x: str) -> int | list[int]:
+    if x.lower() == "all":
+        return None
     if "," in x:
         return [int(y) for y in x.split(",")]
     return int(x)
@@ -340,87 +342,25 @@ def get_contiguous_arr_idxs(
     return output_segment_idxs
 
 
-def read_dicom_as_sitk(file_paths: list[str], metadata: dict[str, str] = {}):
-    """
-    Reads a DICOM file as SITK, using z-spacing to order slices in the
-    volume.
-
-    Args:
-        file_paths (list[str]): list of file paths belonging to the same
-            series.
-        metadata (dict[str,str]): sets as SITK metadata. Defaults to {}.
-
-    Returns:
-        sitk.Image: SimpleITK image made up of the dcms in file_paths.
-    """
-
-    def get_pixel_data(f) -> np.ndarray:
-        intercept, scale = 0, 1
-        if RESCALE_INTERCEPT_TAG in f:
-            intercept = f[RESCALE_INTERCEPT_TAG].value
-        if RESCALE_SLOPE_TAG in f:
-            scale = f[RESCALE_SLOPE_TAG].value
-        return f.pixel_array * scale + intercept
-
+def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
+    reader = sitk.ImageSeriesReader()
+    dicom_file_names = reader.GetGDCMSeriesFileNames(file_path)
     fs = []
     good_file_paths = []
-    orientation = None
-    series_path = os.path.dirname(file_paths[0])
-    for dcm_file in file_paths:
+    for dcm_file in dicom_file_names:
         f = dcmread(dcm_file)
         if (0x0020, 0x0037) in f:
             orientation = f[0x0020, 0x0037].value
         if (0x0020, 0x0032) in f:
             fs.append(f)
             good_file_paths.append(dcm_file)
-    fs = filter_by_bvalue(fs, 1400)
-    if orientation is None:
-        raise RuntimeError(f"No orientation available for {series_path}")
-    position = np.array([x[0x0020, 0x0032].value for x in fs])
-    rankings = np.array([x[0x0020, 0x0013].value for x in fs])
+    reader.SetFileNames(good_file_paths)
 
-    segment_selection = get_contiguous_arr_idxs(position, rankings)
-    if segment_selection is not None:
-        fs = [x for x in fs if x[0x0020, 0x0013].value in segment_selection]
-    position = np.array([x[0x0020, 0x0032].value for x in fs])
-    rankings = np.array([x[0x0020, 0x0013].value for x in fs])
-    if segment_selection is None:
-        raise RuntimeError(f"Positions are incorrect for {series_path}")
-    orientation = list(map(float, orientation))
-    orientation_sitk = dicom_orientation_to_sitk_direction(orientation)
-    z_axis = 2
-    real_position = np.matmul(
-        position, np.array(orientation_sitk).reshape([3, 3])
-    )
-    z_position = np.sort(real_position[:, z_axis])
-    z_spacing = np.median(np.diff(z_position))
-    if np.isclose(z_spacing, 0):
-        raise RuntimeError(
-            f"Incorrect z-spacing information for {series_path}."
-            + "This may be due to multiple slices having identical positions"
-        )
-    pixel_spacing = [*f[0x0028, 0x0030].value, z_spacing]
-    fs = sorted(fs, key=lambda x: float(x[0x0020, 0x0032].value[z_axis]))
-
-    origin_sitk = get_origin(position, z_axis=z_axis)
-    pixel_spacing_sitk = pixel_spacing
-    try:
-        pixel_data = np.stack(
-            [get_pixel_data(f) for f in fs],
-        )
-    except Exception as e:
-        logger.error(e)
-        raise RuntimeError(f"Pixel data could not be read for {series_path}")
-
-    sitk_image = sitk.GetImageFromArray(pixel_data)
-    sitk_image.SetDirection(orientation_sitk)
-    sitk_image.SetOrigin(origin_sitk)
-    sitk_image.SetSpacing(pixel_spacing_sitk)
+    sitk_image: sitk.Image = reader.Execute()
 
     for k in metadata:
         sitk_image.SetMetaData(k, metadata[k])
-
-    return sitk_image, good_file_paths
+    return sitk_image
 
 
 def get_study_uid(dicom_dir: str) -> str:
