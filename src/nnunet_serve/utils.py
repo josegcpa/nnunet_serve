@@ -29,6 +29,22 @@ RESCALE_INTERCEPT_TAG = (0x0028, 0x1052)
 RESCALE_SLOPE_TAG = (0x0028, 0x1053)
 
 
+def float_or_none(x: str) -> float | None:
+    if x.lower() == "none":
+        return None
+    return float(x)
+
+
+def int_or_list_of_ints(x: str) -> int | list[int]:
+    if "," in x:
+        return [int(y) for y in x.split(",")]
+    return int(x)
+
+
+def list_of_str(x: str) -> list[str]:
+    return x.split(",")
+
+
 def copy_information_nd(
     target_image: sitk.Image, source_image: sitk.Image
 ) -> sitk.Image:
@@ -697,60 +713,35 @@ def make_parser(
     """
     parser = argparse.ArgumentParser(description)
     parser.add_argument(
-        "--series_paths",
+        "--study_path",
         "-i",
-        nargs="+",
         help="Path to input series",
         required=True,
     )
     parser.add_argument(
-        "--model_path",
-        "-m",
-        help="Path to nnUNet model folder",
+        "--series_folders",
+        "-s",
+        nargs="+",
+        type=list_of_str,
+        help="Path to input series folders",
+        required=True,
+    )
+    parser.add_argument(
+        "--nnunet_id",
+        nargs="+",
+        help="nnUNet ID",
         required=True,
     )
     parser.add_argument(
         "--checkpoint_name",
-        "-ckpt",
         help="Checkpoint name for nnUNet",
-        default="checkpoint_best.pth",
+        default="checkpoint_final.pth",
     )
     parser.add_argument(
         "--output_dir",
         "-o",
         help="Path to output directory",
         required=True,
-    )
-    parser.add_argument(
-        "--metadata_path",
-        "-M",
-        help="Path to metadata template for DICOM-Seg output",
-        required=True,
-    )
-    parser.add_argument(
-        "--fractional_metadata_path",
-        help="Path to metadata template for fractional DICOM-Seg output \
-            (defaults to --metadata_path)",
-        default=None,
-    )
-    parser.add_argument(
-        "--empty_segment_metadata",
-        help="Path to metadata template for when predictions are empty",
-        default=None,
-    )
-    parser.add_argument(
-        "--fractional_as_segments",
-        help="Converts the fractional output to a categorical DICOM-Seg with \
-            discretized probabilities (the number of discretized probabilities \
-            is specified as the number of segmentAttributes in metadata_path \
-            or fractional_metadata_path)",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--study_uid",
-        "-s",
-        help="Study UID if series are SimpleITK-readable files",
-        default=None,
     )
     parser.add_argument(
         "--folds",
@@ -788,14 +779,16 @@ def make_parser(
     parser.add_argument(
         "--proba_threshold",
         help="Sets probabilities in proba_map lower than proba_threhosld to 0",
-        type=float,
-        default=0.1,
+        type=float_or_none,
+        default=0.5,
+        nargs="+",
     )
     parser.add_argument(
         "--min_confidence",
         help="Removes objects whose max prob is smaller than min_confidence",
-        type=float,
+        type=float_or_none,
         default=None,
+        nargs="+",
     )
     parser.add_argument(
         "--rt_struct_output",
@@ -810,23 +803,38 @@ def make_parser(
         action="store_true",
     )
     parser.add_argument(
+        "--cascade_mode",
+        help="Defines the cascade mode. Must be either intersect or crop.",
+        default="intersect",
+        type=str,
+        choices=["intersect", "crop"],
+    )
+    parser.add_argument(
         "--intersect_with",
-        help="Calculates the IoU with the sitk mask image in this path and uses\
+        help="Calculates the IoU with the SITK mask image in this path and uses\
             this value to filter images such that IoU < --min_intersection are ruled out.",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--crop_from",
+        help="Crops the input to the bounding box of the SITK mask image in this path.",
         default=None,
         type=str,
     )
     parser.add_argument(
         "--min_intersection",
         help="Minimum intersection over the union to keep a candidate.",
-        default=0.1,
+        default=float_or_none,
         type=float,
+        nargs="+",
     )
     parser.add_argument(
         "--class_idx",
         help="Class index.",
-        default=None,
-        type=int,
+        default=1,
+        type=int_or_list_of_ints,
+        nargs="+",
     )
     parser.add_argument(
         "--suffix",
