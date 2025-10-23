@@ -3,7 +3,6 @@ General utilities.
 """
 
 import argparse
-import os
 from glob import glob
 
 import numpy as np
@@ -196,7 +195,9 @@ def resample_image_to_target(
 def resample_image(
     sitk_image: sitk.Image,
     out_spacing: Sequence[float] = [1.0, 1.0, 1.0],
+    out_size: Sequence[int] = None,
     is_mask: bool = False,
+    interpolator=sitk.sitkLinear,
 ) -> sitk.Image:
     """Resamples an SITK image to out_spacing. If is_mask is True, uses
     nearest neighbour interpolation. Otherwise, it uses B-splines.
@@ -207,6 +208,8 @@ def resample_image(
             Defaults to [1.0, 1.0, 1.0].
         is_mask (bool, optional): sets the interpolation to nearest neighbour.
             Defaults to False.
+        interpolator (optional): interpolation method.
+            Defaults to sitk.sitkLinear.
 
     Returns:
         sitk.Image: resampled SITK image.
@@ -214,17 +217,24 @@ def resample_image(
     original_spacing = sitk_image.GetSpacing()
     original_size = sitk_image.GetSize()
 
-    out_size = [
-        int(
-            np.round(original_size[0] * (original_spacing[0] / out_spacing[0]))
-        ),
-        int(
-            np.round(original_size[1] * (original_spacing[1] / out_spacing[1]))
-        ),
-        int(
-            np.round(original_size[2] * (original_spacing[2] / out_spacing[2]))
-        ),
-    ]
+    if out_size is None:
+        out_size = [
+            int(
+                np.round(
+                    original_size[0] * (original_spacing[0] / out_spacing[0])
+                )
+            ),
+            int(
+                np.round(
+                    original_size[1] * (original_spacing[1] / out_spacing[1])
+                )
+            ),
+            int(
+                np.round(
+                    original_size[2] * (original_spacing[2] / out_spacing[2])
+                )
+            ),
+        ]
 
     resample = sitk.ResampleImageFilter()
     resample.SetOutputSpacing(out_spacing)
@@ -232,16 +242,69 @@ def resample_image(
     resample.SetOutputDirection(sitk_image.GetDirection())
     resample.SetOutputOrigin(sitk_image.GetOrigin())
     resample.SetTransform(sitk.Transform())
-    resample.SetDefaultPixelValue(0.0)
+    resample.SetDefaultPixelValue(0)
 
     if is_mask is True:
-        resample.SetInterpolator(sitk.sitkNearestNeighbor)
+        resample.SetInterpolator(sitk.sitkLabelLinear)
     else:
-        resample.SetInterpolator(sitk.sitkBSpline)
+        resample.SetInterpolator(interpolator)
 
     output = resample.Execute(sitk_image)
 
     return output
+
+
+def resample_sitk_bicubic(image, new_spacing):
+    old_spacing = np.array(image.GetSpacing())
+    old_size = np.array(image.GetSize())
+
+    new_size = np.round(
+        old_size * (old_spacing / np.array(new_spacing))
+    ).astype(int)
+
+    arr = sitk.GetArrayFromImage(image)
+
+    zoom_factors = old_spacing[::-1] / np.array(new_spacing[::-1])
+
+    arr_resampled = ndimage.zoom(arr, zoom_factors, order=3)
+
+    resampled = sitk.GetImageFromArray(arr_resampled)
+    resampled.SetOrigin(image.GetOrigin())
+    resampled.SetDirection(image.GetDirection())
+    resampled.SetSpacing(new_spacing)
+
+    return resampled
+
+
+def remove_small_objects(
+    image: np.ndarray, min_size: float | int = 0.99
+) -> np.ndarray:
+    """
+    Removes small objects from a multi-label image.
+
+    Args:
+        image (np.ndarray): Input multi-label image.
+        min_size (float | int, optional): Minimum size of objects to keep in
+            voxels. If it is a float, computes the minimum size as a percentage
+            of the maximum object size. Defaults to 0.99.
+
+    Returns:
+        np.ndarray: Image with small objects removed.
+    """
+    unique_labels = np.unique(image)
+    for u in unique_labels:
+        if u == 0:
+            continue
+        labels, num_features = ndimage.label(image == u)
+        label_sizes = {
+            i: np.sum(labels == i) for i in range(1, num_features + 1)
+        }
+        if isinstance(min_size, float):
+            min_size = int(min_size * max(label_sizes.values()))
+        for i in range(1, num_features + 1):
+            if label_sizes[i] < min_size:
+                image[labels == i] = 0
+    return image
 
 
 def mode(a: np.ndarray) -> int | float:
@@ -360,7 +423,7 @@ def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
 
     for k in metadata:
         sitk_image.SetMetaData(k, metadata[k])
-    return sitk_image
+    return sitk_image, good_file_paths
 
 
 def get_study_uid(dicom_dir: str) -> str:
