@@ -7,6 +7,8 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from difflib import SequenceMatcher
+
 
 import highdicom as hd
 import numpy as np
@@ -16,6 +18,7 @@ import SimpleITK as sitk
 from copy import deepcopy
 from pydicom.sr._concepts_dict import concepts as CONCEPTS
 from pydicom.sr.codedict import Code, codes
+from pydicom_seg.template import rgb_to_cielab
 from tqdm import tqdm
 
 from nnunet_serve.category_mapping import CATEGORY_MAPPING
@@ -40,10 +43,33 @@ def get_empty_segment(
 
 
 def random_color_generator():
+    """
+    Returns a random color as a tuple of RGB values.
+
+    Returns:
+        tuple: tuple of RGB values.
+    """
     r = random.randint(0, 255)
     g = random.randint(0, 255)
     b = random.randint(0, 255)
     return (r, g, b)
+
+
+def close_match(a, b, ratio: float = 0.8) -> bool:
+    """
+    Returns True if the ratio of matching characters between strings a and b
+    is greater than the specified ratio.
+
+    Args:
+        a (str): first string.
+        b (str): second string.
+        ratio (float): ratio of matching characters.
+
+    Returns:
+        bool: True if the ratio of matching characters between strings a and b
+            is greater than the specified ratio.
+    """
+    return SequenceMatcher(None, a, b).ratio() > ratio
 
 
 def one_hot_encode(arr: np.ndarray, n_labels: int) -> np.ndarray:
@@ -119,10 +145,24 @@ def save_mask_as_rtstruct(
     rtstruct.save(str(output_path))
 
 
+def to_camel_case(snake_str: str) -> str:
+    """
+    Convert a snake_case string to a camelCase string.
+    """
+    if snake_str == "adrenalgland":
+        return "AdrenalGland"
+    elif "_" in snake_str or snake_str[0].islower():
+        snake_str = deepcopy(snake_str)
+        snake_str = snake_str.capitalize()
+        return "".join(x.capitalize() for x in snake_str.lower().split("_"))
+    return snake_str
+
+
 @dataclass
 class SegWriter:
-    segment_names: list[str | dict[str, str]]
     algorithm_name: str
+    segment_names: list[str | dict[str, str]] | None = None
+    segment_descriptions: list[hd.seg.SegmentDescription] | None = None
     algorithm_version: str = "v1.0"
     algorithm_family: pydicom.sr.coding.Code = (
         codes.CID7162.ArtificialIntelligence
@@ -138,19 +178,27 @@ class SegWriter:
     clinical_trial_series_id: str = "1"
     clinical_trial_time_point_id: str = "1"
     body_part_examined: str = "BODY"
+    validate: bool = False
 
     def __post_init__(self):
-        self.segment_descriptions = []
+        if self.segment_descriptions is None and self.segment_names is None:
+            raise ValueError(
+                "Either segment_descriptions or segment_names must be provided"
+            )
         category_concepts = codes.CID7150.concepts
         self.algorithm_identification = hd.AlgorithmIdentificationSequence(
             name=self.algorithm_name,
             version=self.algorithm_version,
             family=self.algorithm_family,
         )
+        if self.segment_names is None:
+            return
+        if self.segment_descriptions is None:
+            self.segment_descriptions = []
         for i, segment in enumerate(self.segment_names):
             segment_dict = {}
             if isinstance(segment, dict):
-                segment_dict["name"] = self.process_name(segment["name"])
+                segment_dict["name"] = segment["name"]
                 segment_dict["number"] = segment.get("number", i + 1)
                 segment_dict["label"] = segment.get("label", segment["name"])
                 segment_dict["tracking_id"] = segment.get(
@@ -159,7 +207,7 @@ class SegWriter:
                 )
                 segment_dict["code"] = segment.get("code", None)
             elif isinstance(segment, str):
-                segment_dict["name"] = self.process_name(segment)
+                segment_dict["name"] = segment
                 segment_dict["number"] = i + 1
                 segment_dict["label"] = segment
                 segment_dict[
@@ -169,7 +217,16 @@ class SegWriter:
             else:
                 raise ValueError(f"Invalid segment: {segment}")
             if segment_dict["code"] is None:
-                type_code_dict = CONCEPTS["SCT"][segment_dict["name"]]
+                name = to_camel_case(self.process_name(segment_dict["name"]))
+                if name not in CONCEPTS["SCT"]:
+                    closest_matches = []
+                    for k in CONCEPTS["SCT"]:
+                        if close_match(k, name, 0.8):
+                            closest_matches.append(k)
+                    raise ValueError(
+                        f"Segment {name} not found in SCT. Closest matches: {closest_matches}"
+                    )
+                type_code_dict = CONCEPTS["SCT"][name]
                 segment_dict["code"] = list(type_code_dict.keys())[0]
                 segment_dict["name"], _ = type_code_dict[segment_dict["code"]]
             type_code = Code(
@@ -184,7 +241,7 @@ class SegWriter:
                 for k in category_concepts
                 if category_concepts[k].value == category_number
             ][0]
-
+            random_rgb_colour = random_color_generator()
             segment_description = hd.seg.SegmentDescription(
                 segment_number=segment_dict["number"],
                 segment_label=segment_dict["label"],
@@ -195,11 +252,25 @@ class SegWriter:
                 tracking_uid=hd.UID(),
                 tracking_id=segment_dict["tracking_id"],
             )
+            segment_description.RecommendedDisplayCIELabValue = rgb_to_cielab(
+                random_rgb_colour
+            )
             self.segment_descriptions.append(segment_description)
 
+        if self.validate is True:
+            for i, segment_description in enumerate(self.segment_descriptions):
+                logger.info(
+                    "Segment %s: %s, %s, class_idx=%i",
+                    segment_description.segment_number,
+                    segment_description.segment_label,
+                    segment_description.segmented_property_type.meaning,
+                    i,
+                )
+
     def process_name(self, name: str) -> str:
-        name = re.sub("[ ]*[lL]eft[ ]*", "", name)
-        name = re.sub("[ ]*[rR]ight[ ]*", "", name)
+        name = re.sub("[ _]*[lL]eft[ _]*", "", name)
+        name = re.sub("[ _]*[rR]ight[ _]*", "", name)
+        name = re.sub("[ _]+", "", name)
         name = name.strip()
         return name
 
@@ -217,7 +288,7 @@ class SegWriter:
         output_path: str,
         is_fractional: bool = False,
     ):
-        mask_array = self.to_array_if_necessary(mask_array)
+        mask_array = self.to_array_if_necessary(mask_array)[::-1, :, :]
         # adjust array size and segment descriptions to the scritly necessary
         labels = np.unique(mask_array)
         labels = labels[labels > 0]
@@ -225,6 +296,7 @@ class SegWriter:
             logging.warning("Mask is empty")
             return "empty"
         label_dict = {label: i + 1 for i, label in enumerate(labels)}
+        label_dict[0] = 0
         mask_array = np.vectorize(label_dict.get)(mask_array)
         segment_descriptions = []
         for i, label in enumerate(labels):
@@ -276,6 +348,7 @@ class SegWriter:
             software_versions=self.algorithm_version,
             device_serial_number="42",
             series_description="Segmentation",
+            workers=8,
         )
         seg_dataset.ClinicalTrialSeriesID = self.clinical_trial_series_id
         seg_dataset.ClinicalTrialTimePointID = self.clinical_trial_time_point_id
@@ -323,7 +396,7 @@ class SegWriter:
         clinical_trial_time_point_id = metadata.ClinicalTrialTimePointID
         body_part_examined = metadata.BodyPartExamined
         return SegWriter(
-            segment_names=segments,
+            segment_descriptions=segments,
             algorithm_name=algorithm_name,
             algorithm_version=algorithm_version,
             algorithm_family=codes.CID7162.ArtificialIntelligence,
@@ -339,11 +412,13 @@ class SegWriter:
         )
 
     @staticmethod
-    def init_from_metadata_dict(metadata: dict[str, str]):
+    def init_from_metadata_dict(
+        metadata: dict[str, str], validate: bool = False
+    ):
         if "path" in metadata:
             return SegWriter.init_from_dcmqi_metadata_file(metadata["path"])
         else:
-            return SegWriter(**metadata)
+            return SegWriter(**metadata, validate=validate)
 
 
 if __name__ == "__main__":
