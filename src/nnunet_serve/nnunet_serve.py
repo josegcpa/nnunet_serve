@@ -8,17 +8,25 @@ where nnunet_serve is utilized.
 import os
 import re
 import time
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
+from glob import glob
 
 import fastapi
 import numpy as np
 import torch
 import uvicorn
 import yaml
+from totalsegmentator.map_to_binary import class_map
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from totalsegmentator.libs import download_pretrained_weights
 
+from nnunet_serve.totalseg_utils import (
+    TASK_CONVERSION,
+    load_snomed_mapping_expanded,
+)
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.nnunet_serve_utils import (
     FAILURE_STATUS,
@@ -43,6 +51,8 @@ torch.serialization.add_safe_globals(
 origins = ["http://localhost:8404"]
 
 logger = get_logger(__name__)
+
+TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 
 @dataclass
@@ -113,10 +123,12 @@ class nnUNetAPI:
             min_mem = nnunet_info.get("min_mem", 4000)
             default_args = nnunet_info.get("default_args", {})
             metadata = nnunet_info.get("metadata", None)
+            is_totalseg = nnunet_info.get("is_totalseg", False)
         else:
             nnunet_path = []
             metadata = []
             default_args = []
+            is_totalseg = []
             min_mem = 0
             for nn in nnunet_id:
                 if nn not in self.alias_dict:
@@ -139,6 +151,8 @@ class nnUNetAPI:
                     min_mem = curr_min_mem
                 default_args.append(nnunet_info.get("default_args", {}))
                 metadata.append(nnunet_info.get("metadata", None))
+                is_totalseg.append(nnunet_info.get("is_totalseg", False))
+
         default_params = get_default_params(default_args)
 
         # assign
@@ -185,6 +199,7 @@ class nnUNetAPI:
                 device_id=device_id,
                 params=params,
                 nnunet_path=nnunet_path,
+                flip_xy=is_totalseg,
             )
             error = None
             status = SUCCESS_STATUS
@@ -247,10 +262,51 @@ def get_model_dictionary() -> tuple[dict, dict]:
     )
     with open(model_spec_path) as o:
         models_specs = yaml.safe_load(o)
-    get_totalseg_dir(models_specs)
+    totalseg_dir = get_totalseg_dir(models_specs)
     alias_dict = {}
+    if "model_folder" not in models_specs:
+        raise ValueError(
+            "model_folder must be specified in model-serve-spec.yaml"
+        )
     for model in models_specs["models"]:
         k = model["id"]
+        model["is_totalseg"] = model.get("is_totalseg", False)
+        if "totalseg_task" in model:
+            task = model["totalseg_task"]
+            task_clean = task.replace("_fastest", "").replace("_fast", "")
+            task_id = TASK_CONVERSION[task]
+            download_pretrained_weights(task_id)
+            model["rel_path"] = glob(
+                os.path.join(totalseg_dir, f"*{task_id}*")
+            )[0].replace(models_specs["model_folder"], "")
+            model["name"] = f"totalseg_{task}"
+            segment_names = {v: k for k, v in class_map[task_clean].items()}
+            segment_names = sorted(
+                segment_names.keys(), key=lambda k: segment_names[k]
+            )
+            snomed_concepts = [
+                {
+                    "name": k,
+                    **TOTAL_SEG_SNOMED_MAPPING[k]["property_type"],
+                    "label": TOTAL_SEG_SNOMED_MAPPING[k]["property_type"][
+                        "meaning"
+                    ],
+                }
+                for k in segment_names
+            ]
+            model["is_totalseg"] = True
+            model["metadata"] = {
+                "segment_names": snomed_concepts,
+                "algorithm_name": "TotalSegmentator",
+                "algorithm_version": importlib.metadata.version(
+                    "TotalSegmentator"
+                ),
+                "manufacturer": "TotalSegmentator",
+                "manufacturer_model_name": "TotalSegmentator",
+                "series_description": f"TotalSegmentator (task: {task})",
+                "body_part_examined": "BODY",
+            }
+
         model_name = model["name"]
         alias_dict[model_name] = k
         alias_dict[k] = k
@@ -258,10 +314,6 @@ def get_model_dictionary() -> tuple[dict, dict]:
             for alias in model["aliases"]:
                 alias_dict[alias] = k
             del model["aliases"]
-    if "model_folder" not in models_specs:
-        raise ValueError(
-            "model_folder must be specified in model-serve-spec.yaml"
-        )
     grep_str = "|".join([model["rel_path"] for model in models_specs["models"]])
     pat = re.compile(grep_str)
 

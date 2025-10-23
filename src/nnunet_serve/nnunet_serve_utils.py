@@ -6,12 +6,12 @@ import json
 import os
 import subprocess as sp
 from enum import Enum
-from glob import glob
 from typing import Any, Union
 
 import numpy as np
 import SimpleITK as sitk
 import torch
+from copy import deepcopy
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from batchgenerators.dataloading.multi_threaded_augmenter import (
     MultiThreadedAugmenter,
@@ -35,6 +35,9 @@ from nnunet_serve.utils import (
     intersect,
     read_dicom_as_sitk,
     resample_image_to_target,
+    resample_image,
+    resample_sitk_bicubic,
+    remove_small_objects,
 )
 
 logger = get_logger(__name__)
@@ -74,7 +77,7 @@ class InferenceRequest(BaseModel):
         default=1,
     )
     checkpoint_name: str = Field(
-        description="nnUNet checkpoint name", default=None
+        description="nnUNet checkpoint name", default="checkpoint_final.pth"
     )
     tmp_dir: str = Field(
         description="Directory for temporary outputs", default=".tmp"
@@ -109,7 +112,8 @@ class InferenceRequest(BaseModel):
         default=None,
     )
     crop_padding: tuple[int, int, int] | None = Field(
-        description="Padding to be added to the cropped region", default=None
+        description="Padding to be added to the cropped region",
+        default=(10, 10, 10),
     )
     cascade_mode: CascadeMode = Field(
         description="Whether to crop inputs to consecutive bounding boxes "
@@ -138,6 +142,57 @@ class InferenceRequest(BaseModel):
                 "proba_threshold must be not-None if save_proba_map is True"
             )
         self.cascade_mode = self.cascade_mode.value
+
+
+def to_closest_canonical_sitk(
+    img: sitk.Image | list[sitk.Image],
+) -> sitk.Image | list[sitk.Image]:
+    if isinstance(img, list):
+        return [to_closest_canonical_sitk(i) for i in img]
+    direction = img.GetDirection()
+    direction_matrix = np.array(direction).reshape(3, 3)
+    flip_axes = [
+        i
+        for i in range(3)
+        if np.dot(direction_matrix[:, i], np.eye(3)[:, i]) < 0
+    ]
+
+    canonical_img = img
+    for axis in flip_axes:
+        canonical_img = sitk.Flip(
+            canonical_img, [axis == i for i in range(3)], False
+        )
+
+    canonical_img.SetDirection(tuple(np.eye(3).flatten()))
+    return canonical_img
+
+
+def from_closest_canonical_sitk(
+    canonical_img: sitk.Image | list[sitk.Image],
+    original_img: sitk.Image | list[sitk.Image],
+) -> sitk.Image | list[sitk.Image]:
+    if isinstance(canonical_img, list):
+        return [
+            from_closest_canonical_sitk(i, o)
+            for i, o in zip(canonical_img, original_img)
+        ]
+    original_direction = np.array(original_img[0].GetDirection()).reshape(3, 3)
+    canonical_direction = np.eye(3)
+
+    flip_axes = [
+        i
+        for i in range(3)
+        if np.dot(original_direction[:, i], canonical_direction[:, i]) < 0
+    ]
+
+    restored_img = canonical_img
+    for axis in flip_axes:
+        restored_img = sitk.Flip(
+            restored_img, [axis == i for i in range(3)], False
+        )
+
+    restored_img.SetDirection(tuple(original_direction.flatten()))
+    return restored_img
 
 
 def convert_predicted_logits_to_segmentation_with_correct_shape(
@@ -240,9 +295,9 @@ def predict_from_data_iterator_local(
         prediction = predictor.predict_logits_from_preprocessed_data(data).cpu()
         n_classes = prediction.shape[0]
         logger.info("nnUNet: predicted logits")
+        old_labels = predictor.label_manager._all_labels
+        old_regions = predictor.label_manager._regions
         if class_idx is not None:
-            old_labels = predictor.label_manager._all_labels
-            old_regions = predictor.label_manager._regions
             if isinstance(class_idx, int):
                 class_idx = [class_idx]
             used_labels = [0, *class_idx]
@@ -262,12 +317,12 @@ def predict_from_data_iterator_local(
         logger.info("nnUNet: resampling...")
         processed_output = (
             convert_predicted_logits_to_segmentation_with_correct_shape(
-                prediction,
-                predictor.plans_manager,
-                predictor.configuration_manager,
-                predictor.label_manager,
-                properties,
-                save_probabilities,
+                predicted_logits=prediction,
+                plans_manager=predictor.plans_manager,
+                configuration_manager=predictor.configuration_manager,
+                label_manager=predictor.label_manager,
+                properties_dict=properties,
+                return_probabilities=save_probabilities,
             )
         )
         if class_idx is not None:
@@ -455,6 +510,7 @@ def predict(
     device_id: int,
     params: dict,
     nnunet_path: str | list[str],
+    flip_xy: bool | list[bool] = False,
 ) -> list[str]:
     """
     Runs the prediction for a set of models.
@@ -468,6 +524,8 @@ def predict(
         device_id (int): GPU identifier.
         params (dict): parameters which will be used in wraper.
         nnunet_path (str | list[str]): path or paths to nnUNet model.
+        flip_xy (bool | list[bool]): whether to flip the x and y axes during
+            inference. Defaults to False.
 
     Returns:
         list[str]: list of output paths.
@@ -477,6 +535,7 @@ def predict(
         use_gaussian=True,
         use_mirroring=mirroring,
         device=torch.device("cuda", device_id),
+        perform_everything_on_device=True,
         verbose=False,
         verbose_preprocessing=False,
         allow_tqdm=True,
@@ -496,6 +555,7 @@ def predict(
         "crop_padding",
         "min_overlap",
         "cascade_mode",
+        "flip_xy",
     ]
     export_param_names = [
         "output_dir",
@@ -541,6 +601,7 @@ def predict(
         series_paths=series_paths,
         predictor=predictor,
         nnunet_path=nnunet_path,
+        flip_xy=flip_xy,
         **inference_params,
     )
 
@@ -561,7 +622,7 @@ def predict(
 def get_crop(
     image: str | sitk.Image,
     target_image: sitk.Image | None = None,
-    crop_padding: tuple[int, int, int] | None = None,
+    crop_padding: tuple[int, int, int] | None = (10, 10, 10),
     min_size: tuple[int, int, int] | None = None,
 ) -> tuple[int, int, int, int, int, int]:
     """
@@ -599,9 +660,16 @@ def get_crop(
     start, size = bounding_box[:3], bounding_box[3:]
 
     if crop_padding is not None:
-        for i in range(3):
-            start[i] = max(start[i] - crop_padding[i], 0)
-            size[i] = min(size[i] + crop_padding[i], target_image_size[i])
+        start = tuple([max(start[i] - crop_padding[i], 0) for i in range(3)])
+        size = tuple(
+            [
+                min(
+                    int(size[i] + crop_padding[i] * 2),
+                    int(target_image_size[i] - start[i]),
+                )
+                for i in range(3)
+            ]
+        )
     if min_size is not None:
         for i in range(3):
             if size[i] < min_size[i]:
@@ -626,6 +694,7 @@ def get_crop(
         target_image_size[2] - bounding_box[5],
     ]
     output_padding = list(map(int, output_padding))
+
     return bounding_box, output_padding
 
 
@@ -639,9 +708,7 @@ def load_series(series_paths: list[list[str]], is_dicom: bool = False):
     all_good_file_paths = {}
     for s in unique_series_paths:
         if is_dicom:
-            unique_volumes[s], all_good_file_paths[s] = read_dicom_as_sitk(
-                glob(f"{s}/*dcm")
-            )
+            unique_volumes[s], all_good_file_paths[s] = read_dicom_as_sitk(s)
         else:
             unique_volumes[s] = sitk.ReadImage(s)
     logger.info("Loaded %d unique volumes", len(unique_volumes))
@@ -658,7 +725,8 @@ def load_series(series_paths: list[list[str]], is_dicom: bool = False):
         else:
             curr_volumes = [unique_volumes[series_path[0]]]
         all_volumes.append(curr_volumes)
-    return all_volumes, all_good_file_paths
+    all_volumes_canonical = [to_closest_canonical_sitk(v) for v in all_volumes]
+    return all_volumes, all_volumes_canonical, all_good_file_paths
 
 
 def process_proba_array(
@@ -802,6 +870,7 @@ def single_model_inference(
     crop_class_idx: int = 1,
     crop_padding: tuple[int, int, int] | None = None,
     min_overlap: float = 0.1,
+    flip_xy: bool = False,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
     """
     Runs the inference for a single model.
@@ -838,6 +907,8 @@ def single_model_inference(
             intersect with ``intersect_with``. Defaults to 0.1.
         prediction_name (str | None, optional): name of the prediction. Defaults
             to None.
+        flip_xy (bool, optional): whether to flip the x and y axes of the input.
+            TotalSegmentator does this for some reason. Defaults to False.
 
     Raises:
         ValueError: if there is a mismatch between the number of series and
@@ -854,7 +925,9 @@ def single_model_inference(
         use_folds=use_folds,
         checkpoint_name=checkpoint_name,
     )
-    patch_size = predictor.configuration_manager.configuration["patch_size"]
+    input_spacing = volumes[0].GetSpacing()
+    original_size = volumes[0].GetSize()
+    spacing = predictor.configuration_manager.spacing
 
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
@@ -868,13 +941,13 @@ def single_model_inference(
     if crop_from is not None:
         logger.info("Cropping input")
         crop_from = filter_labels(crop_from, crop_class_idx, True)
-        bb, output_padding = get_crop(
-            crop_from, volumes[0], crop_padding, patch_size[::-1]
-        )
+        bb, output_padding = get_crop(crop_from, volumes[0], crop_padding)
         volumes = [
             v[bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]] for v in volumes
         ]
 
+    logger.info("Resampling input images to nnUNet model spacing")
+    volumes = [resample_sitk_bicubic(volume, spacing) for volume in volumes]
     logger.info("Running inference using %s", nnunet_path)
     input_array = np.stack([sitk.GetArrayFromImage(v) for v in volumes])
     image_properties = {
@@ -889,14 +962,25 @@ def single_model_inference(
     logger.info("Input direction: %s", volumes[0].GetDirection())
     logger.info("Input size: %s", volumes[0].GetSize())
     logger.info("nnUNet: creating data iterator")
+    if flip_xy:
+        input_array = input_array[:, :, ::-1, ::-1]
     iterator = predictor.get_data_iterator_from_raw_npy_data(
         [input_array], None, [image_properties], None, 1
     )
     logger.info("nnUNet: running inference")
     mask_array, proba_array = predict_from_data_iterator_local(
-        predictor, iterator, save_probabilities=True, class_idx=class_idx
+        predictor,
+        iterator,
+        save_probabilities=True,
+        class_idx=class_idx,
     )[0]
-    print(np.unique(mask_array))
+    if flip_xy:
+        mask_array = mask_array[..., ::-1, ::-1]
+        proba_array = proba_array[..., ::-1, ::-1]
+    logger.info("Removing small objects")
+    mask_array = remove_small_objects(mask_array, 0.8)
+    proba_array = proba_array * (mask_array[None] > 1)
+
     logger.info("nnUNet: inference done")
 
     if proba_threshold is not None:
@@ -913,6 +997,15 @@ def single_model_inference(
             class_idx=class_idx,
             output_padding=output_padding,
         )
+        mask = resample_image(
+            mask, input_spacing, out_size=original_size, is_mask=True
+        )
+        probability_map = resample_image(
+            probability_map,
+            input_spacing,
+            out_size=original_size,
+            is_mask=False,
+        )
     else:
         mask, _ = process_mask(
             mask_array,
@@ -922,6 +1015,12 @@ def single_model_inference(
             output_padding=output_padding,
         )
         probability_map = None
+        mask = resample_image(
+            mask, input_spacing, out_size=original_size, is_mask=True
+        )
+
+    if probability_map is not None:
+        probability_map = mask * probability_map
 
     logger.info("Finished processing masks")
 
@@ -959,6 +1058,7 @@ def multi_model_inference(
     crop_from: str | sitk.Image | None = None,
     crop_padding: tuple[int, int, int] | None = None,
     cascade_mode: str = "intersect",
+    flip_xy: bool = False,
 ):
     """
     Prediction wraper for multiple models. Exports the outputs.
@@ -992,12 +1092,17 @@ def multi_model_inference(
             added to the cropped region. Defaults to None.
         cascade_mode (str, optional): whether to crop inputs to consecutive bounding boxes
             or to intersect consecutive outputs. Defaults to "intersect".
+        flip_xy (bool, optional): whether to flip the x and y axes of the input.
+            TotalSegmentator does this for some reason. Defaults to False.
     """
 
     def coherce_to_list(obj: Any, n: int) -> list[Any] | tuple[Any]:
         if isinstance(obj, (list, tuple)):
             if len(obj) != n:
-                raise ValueError(f"{obj} should have length {n}")
+                if len(obj) == 1:
+                    obj = obj * n
+                else:
+                    raise ValueError(f"{obj} should have length {n}")
         else:
             obj = [obj for _ in range(n)]
         return obj
@@ -1036,7 +1141,9 @@ def multi_model_inference(
         logger.info("Using min_confidence %s for inference", min_confidence)
         logger.info("Using checkpoint_name %s for inference", checkpoint_name)
 
-        all_volumes, all_good_file_paths = load_series(series_paths, is_dicom)
+        all_volumes, all_volumes_canonical, all_good_file_paths = load_series(
+            series_paths, is_dicom
+        )
         all_predictions = []
         all_proba_maps = []
         intersect_with_class_idx = 1
@@ -1048,10 +1155,10 @@ def multi_model_inference(
                 out = os.path.join(tmp_dir, f"stage_{i}")
             mask, proba_map = single_model_inference(
                 predictor=predictor,
-                nnunet_path=nnunet_path[i].strip(),
+                nnunet_path=nnunet_path[i],
                 volumes=all_volumes[i],
                 class_idx=class_idx_list[i],
-                checkpoint_name=checkpoint_name.strip(),
+                checkpoint_name=checkpoint_name,
                 output_dir=out,
                 tmp_dir=os.path.join(tmp_dir, f"stage_{i}"),
                 use_folds=use_folds,
@@ -1063,6 +1170,7 @@ def multi_model_inference(
                 crop_from=crop_from,
                 crop_class_idx=crop_class_idx,
                 crop_padding=crop_padding,
+                flip_xy=flip_xy[i],
             )
             all_predictions.append(mask)
             all_proba_maps.append(proba_map)
@@ -1081,12 +1189,14 @@ def multi_model_inference(
         else:
             good_file_paths = None
     else:
-        all_volumes, all_good_file_paths = load_series(series_paths, is_dicom)
+        all_volumes, all_volumes_canonical, all_good_file_paths = load_series(
+            series_paths, is_dicom
+        )
         mask, proba_map = single_model_inference(
             predictor=predictor,
-            nnunet_path=nnunet_path.strip(),
-            volumes=all_volumes,
-            checkpoint_name=checkpoint_name.strip(),
+            nnunet_path=nnunet_path,
+            volumes=all_volumes[0],
+            checkpoint_name=checkpoint_name,
             output_dir=output_dir,
             tmp_dir=tmp_dir,
             use_folds=use_folds,
@@ -1096,6 +1206,7 @@ def multi_model_inference(
             min_overlap=min_overlap,
             crop_from=crop_from,
             crop_padding=crop_padding,
+            flip_xy=flip_xy,
         )
         all_predictions = [mask]
         all_proba_maps = [proba_map]
