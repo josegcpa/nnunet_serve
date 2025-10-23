@@ -206,6 +206,7 @@ class SegWriter:
                     f"Segment{segment_dict['number']}_{segment_dict['label']}",
                 )
                 segment_dict["code"] = segment.get("code", None)
+                segment_dict["scheme"] = segment.get("scheme", "SCT")
             elif isinstance(segment, str):
                 segment_dict["name"] = segment
                 segment_dict["number"] = i + 1
@@ -214,28 +215,33 @@ class SegWriter:
                     "tracking_id"
                 ] = f"Segment{segment_dict['number']}_{segment_dict['label']}"
                 segment_dict["code"] = None
+                segment_dict["scheme"] = "SCT"
             else:
                 raise ValueError(f"Invalid segment: {segment}")
             if segment_dict["code"] is None:
                 name = to_camel_case(self.process_name(segment_dict["name"]))
-                if name not in CONCEPTS["SCT"]:
+                if segment_dict["scheme"] != "SCT":
+                    raise ValueError(f"Only SCT is supported")
+                if name not in CONCEPTS[segment_dict["scheme"]]:
                     closest_matches = []
-                    for k in CONCEPTS["SCT"]:
+                    for k in CONCEPTS[segment_dict["scheme"]]:
                         if close_match(k, name, 0.8):
                             closest_matches.append(k)
                     raise ValueError(
-                        f"Segment {name} not found in SCT. Closest matches: {closest_matches}"
+                        f"Segment {name} not found in {segment_dict['scheme']}. Closest matches: {closest_matches}"
                     )
-                type_code_dict = CONCEPTS["SCT"][name]
+                type_code_dict = CONCEPTS[segment_dict["scheme"]][name]
                 segment_dict["code"] = list(type_code_dict.keys())[0]
                 segment_dict["name"], _ = type_code_dict[segment_dict["code"]]
             type_code = Code(
                 value=segment_dict["code"],
                 meaning=segment_dict["name"],
-                scheme_designator="SCT",
+                scheme_designator=segment_dict["scheme"],
             )
 
-            category_number = CATEGORY_MAPPING["type"][str(type_code.value)]
+            category_number = CATEGORY_MAPPING[segment_dict["scheme"]]["type"][
+                str(type_code.value)
+            ]
             category_code = [
                 category_concepts[k]
                 for k in category_concepts
