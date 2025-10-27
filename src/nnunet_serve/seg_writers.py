@@ -4,6 +4,7 @@ Utilities for writing segmentations.
 
 import logging
 import random
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,20 +17,142 @@ import pydicom
 import pydicom_seg
 import SimpleITK as sitk
 from copy import deepcopy
-from pydicom.sr._concepts_dict import concepts as CONCEPTS
+from pydicom import DataElement
 from pydicom.sr.codedict import Code, codes
 from pydicom_seg.template import rgb_to_cielab
 from tqdm import tqdm
 
-from nnunet_serve.category_mapping import CATEGORY_MAPPING
+from nnunet_serve.coding import (
+    CATEGORY_MAPPING,
+    CODING_SCHEME_INFORMATION,
+    CODING_SCHEME_INFORMATION_VR,
+    NATURAL_LANGUAGE_TO_CODE,
+)
+from nnunet_serve.str_processing import to_camel_case
 from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
+DEFAULT_SEGMENT_SCHEME = os.environ.get("DEFAULT_SEGMENT_SCHEME", "SCT")
 
-def get_empty_segment(
+
+def process_name(name: str) -> str:
+    name = re.sub("[ _]*[lL]eft[ _]*", "", name)
+    name = re.sub("[ _]*[rR]ight[ _]*", "", name)
+    name = re.sub("[ _]+", "", name)
+    name = name.strip()
+    return name
+
+
+def get_segment_type_code(segment: dict | str, i: int) -> Code:
+    """
+    Resolve and build the DICOM coded concept for a segment.
+
+    Args:
+        segment (dict | str): Segment specification. If a dict, the following
+            keys are supported:
+
+            - name (str): Human-readable name of the structure (e.g., "Liver").
+            - number (int, optional): 1-based segment number. Defaults to
+              ``i + 1`` at the call site.
+            - label (str, optional): Display label for the segment. Defaults to
+              the value of ``name``.
+            - tracking_id (str, optional): Stable identifier used for DICOM
+              Tracking ID. Defaults to ``"Segment{number}_{label}"``.
+            - code (str | int | None, optional): Coded value (Code Value) for
+              the segmented property type. If ``None``, it will be looked up
+              automatically from the concept dictionary based on ``name``.
+            - scheme (str, optional): Coding Scheme Designator. Only ``"SCT"``
+              is supported for automatic lookup. Defaults to ``"SCT"``.
+            - category_number (str | int | None, optional): Code Value for the
+              segmented property category. If ``None``, it will be derived
+              downstream using ``CATEGORY_MAPPING`` using the output ``code.value``
+              property as key. Even when this is provided, it should represent
+              a SNOMED CT category number.
+
+            If a string is provided, it is interpreted as ``name``; the
+            remaining fields are inferred using the defaults above. This
+            segment string will be used to index
+            ``pydicom.sr._concepts_dict.CONCEPTS``, after being preprocessed
+            to remove laterality-based indicators (e.g., "Right", "Left"; these
+            are nonetheless included in the ``segment_dict["label"]``).
+        - i (int): 1-based segment number.
+
+    Returns:
+        - Code: A ``pydicom.sr.codedict.Code`` representing the segment's
+            type (value, meaning, scheme_designator).
+        - dict: The normalized segment dictionary with all defaults and the
+            resolved code populated.
+
+    Raises:
+        ValueError: If ``segment`` is neither ``dict`` nor ``str``, if
+            automatic lookup is requested with a non-"SCT" scheme, or if the
+            concept cannot be found in the dictionary (closest matches are
+            reported).
+    """
+    segment_dict = {}
+    if isinstance(segment, dict):
+        segment_dict["name"] = segment["name"]
+        segment_dict["number"] = segment.get("number", i + 1)
+        segment_dict["label"] = segment.get("label", segment["name"])
+        segment_dict["tracking_id"] = segment.get(
+            "tracking_id",
+            f"Segment{segment_dict['number']}_{segment_dict['label']}",
+        )
+        segment_dict["code"] = segment.get("code", None)
+        segment_dict["scheme"] = segment.get("scheme", "SCT")
+        segment_dict["category_number"] = segment.get("category_number", None)
+    elif isinstance(segment, str):
+        segment_dict["name"] = segment
+        segment_dict["number"] = i + 1
+        segment_dict["label"] = segment
+        segment_dict[
+            "tracking_id"
+        ] = f"Segment{segment_dict['number']}_{segment_dict['label']}"
+        segment_dict["code"] = None
+        segment_dict["scheme"] = DEFAULT_SEGMENT_SCHEME
+        segment_dict["category_number"] = None
+    else:
+        raise ValueError(f"Invalid segment: {segment}")
+    if segment_dict["code"] is None:
+        name = to_camel_case(process_name(segment_dict["name"]))
+        if segment_dict["scheme"] not in ["SCT", "EUCAIM"]:
+            raise ValueError(
+                f"Only SCT and EUCAIM schemes are supported for automatic retrieval"
+            )
+        if name not in NATURAL_LANGUAGE_TO_CODE[segment_dict["scheme"]]:
+            closest_matches = []
+            for k in NATURAL_LANGUAGE_TO_CODE[segment_dict["scheme"]]:
+                if close_match(k, name, 0.8):
+                    closest_matches.append(k)
+            raise ValueError(
+                f"Segment {name} not found in {segment_dict['scheme']}. Closest matches: {closest_matches}"
+            )
+        code_info = NATURAL_LANGUAGE_TO_CODE[segment_dict["scheme"]][name]
+        segment_dict["name"] = code_info[0]
+        segment_dict["code"] = code_info[1]
+    segment_code = Code(
+        value=segment_dict["code"],
+        meaning=segment_dict["name"],
+        scheme_designator=segment_dict["scheme"],
+    )
+    return segment_code, segment_dict
+
+
+def get_empty_segment_description(
     algorithm_type, algorithm_identification, tracking_id: str
 ):
+    """
+    Returns an empty segment description.
+
+    Args:
+        algorithm_type (str): algorithm type.
+        algorithm_identification (str): algorithm identification.
+        tracking_id (str): tracking ID.
+
+    Returns:
+        hd.seg.SegmentDescription: empty segment description.
+    """
     return hd.seg.SegmentDescription(
         segment_number=99,
         segment_label="Empty segment",
@@ -145,19 +268,6 @@ def save_mask_as_rtstruct(
     rtstruct.save(str(output_path))
 
 
-def to_camel_case(snake_str: str) -> str:
-    """
-    Convert a snake_case string to a camelCase string.
-    """
-    if snake_str == "adrenalgland":
-        return "AdrenalGland"
-    elif "_" in snake_str or snake_str[0].islower():
-        snake_str = deepcopy(snake_str)
-        snake_str = snake_str.capitalize()
-        return "".join(x.capitalize() for x in snake_str.lower().split("_"))
-    return snake_str
-
-
 @dataclass
 class SegWriter:
     algorithm_name: str
@@ -196,52 +306,12 @@ class SegWriter:
         if self.segment_descriptions is None:
             self.segment_descriptions = []
         for i, segment in enumerate(self.segment_names):
-            segment_dict = {}
-            if isinstance(segment, dict):
-                segment_dict["name"] = segment["name"]
-                segment_dict["number"] = segment.get("number", i + 1)
-                segment_dict["label"] = segment.get("label", segment["name"])
-                segment_dict["tracking_id"] = segment.get(
-                    "tracking_id",
-                    f"Segment{segment_dict['number']}_{segment_dict['label']}",
-                )
-                segment_dict["code"] = segment.get("code", None)
-                segment_dict["scheme"] = segment.get("scheme", "SCT")
-            elif isinstance(segment, str):
-                segment_dict["name"] = segment
-                segment_dict["number"] = i + 1
-                segment_dict["label"] = segment
-                segment_dict[
-                    "tracking_id"
-                ] = f"Segment{segment_dict['number']}_{segment_dict['label']}"
-                segment_dict["code"] = None
-                segment_dict["scheme"] = "SCT"
-            else:
-                raise ValueError(f"Invalid segment: {segment}")
-            if segment_dict["code"] is None:
-                name = to_camel_case(self.process_name(segment_dict["name"]))
-                if segment_dict["scheme"] != "SCT":
-                    raise ValueError(f"Only SCT is supported")
-                if name not in CONCEPTS[segment_dict["scheme"]]:
-                    closest_matches = []
-                    for k in CONCEPTS[segment_dict["scheme"]]:
-                        if close_match(k, name, 0.8):
-                            closest_matches.append(k)
-                    raise ValueError(
-                        f"Segment {name} not found in {segment_dict['scheme']}. Closest matches: {closest_matches}"
-                    )
-                type_code_dict = CONCEPTS[segment_dict["scheme"]][name]
-                segment_dict["code"] = list(type_code_dict.keys())[0]
-                segment_dict["name"], _ = type_code_dict[segment_dict["code"]]
-            type_code = Code(
-                value=segment_dict["code"],
-                meaning=segment_dict["name"],
-                scheme_designator=segment_dict["scheme"],
-            )
+            type_code, segment_dict = get_segment_type_code(segment, i)
 
-            category_number = CATEGORY_MAPPING[segment_dict["scheme"]]["type"][
-                str(type_code.value)
-            ]
+            if segment_dict["category_number"] is None:
+                category_number = CATEGORY_MAPPING[segment_dict["scheme"]][
+                    "type"
+                ][str(type_code.value)]
             category_code = [
                 category_concepts[k]
                 for k in category_concepts
@@ -261,6 +331,25 @@ class SegWriter:
             segment_description.RecommendedDisplayCIELabValue = rgb_to_cielab(
                 random_rgb_colour
             )
+            csi = CODING_SCHEME_INFORMATION[segment_dict["scheme"]]
+            for (
+                prop_type
+            ) in segment_description.SegmentedPropertyTypeCodeSequence:
+                for k in csi:
+                    prop_type[k] = DataElement(
+                        tag=k,
+                        VR=CODING_SCHEME_INFORMATION_VR[k],
+                        value=csi[k],
+                    )
+            for (
+                prop_cat
+            ) in segment_description.SegmentedPropertyCategoryCodeSequence:
+                for k in csi:
+                    prop_cat[k] = DataElement(
+                        tag=k,
+                        VR=CODING_SCHEME_INFORMATION_VR[k],
+                        value=csi[k],
+                    )
             self.segment_descriptions.append(segment_description)
 
         if self.validate is True:
@@ -272,13 +361,9 @@ class SegWriter:
                     segment_description.segmented_property_type.meaning,
                     i,
                 )
-
-    def process_name(self, name: str) -> str:
-        name = re.sub("[ _]*[lL]eft[ _]*", "", name)
-        name = re.sub("[ _]*[rR]ight[ _]*", "", name)
-        name = re.sub("[ _]+", "", name)
-        name = name.strip()
-        return name
+                logger.info(
+                    segment_description.SegmentedPropertyTypeCodeSequence
+                )
 
     def to_array_if_necessary(
         self, mask: np.ndarray | sitk.Image
