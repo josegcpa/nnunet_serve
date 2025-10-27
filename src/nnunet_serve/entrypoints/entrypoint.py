@@ -4,6 +4,9 @@ or DICOM format.
 """
 
 import torch
+import pprint
+import json
+import shutil
 from nnunet_serve.utils import make_parser
 from nnunet_serve.nnunet_serve_utils import InferenceRequest
 from nnunet_serve.nnunet_serve import nnUNetAPI
@@ -34,7 +37,19 @@ def main(args):
         suffix=args.suffix,
     )
 
-    print(nnunet_api.infer(inference_request).body)
+    response = nnunet_api.infer(inference_request)
+    response = json.loads(response.body.decode("utf-8"))
+    for k in [
+        "nifti_prediction",
+        "dicom_segmentation",
+        "dicom_struct",
+        "dicom_fractional_segmentation",
+        "nifti_proba",
+    ]:
+        if k in response:
+            final_prediction = response[k][-1]
+            shutil.copy(final_prediction, args.output_dir)
+    return response
 
 
 if __name__ == "__main__":
@@ -44,6 +59,6 @@ if __name__ == "__main__":
 
     args.output_dir = args.output_dir.strip().rstrip("/")
     args.folds = [int(f) for f in args.folds]
-    main(args)
+    pprint.pprint(main(args))
 
     torch.cuda.empty_cache()
