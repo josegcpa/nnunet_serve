@@ -101,10 +101,10 @@ class InferenceRequest(BaseModel):
     )
     intersect_with: str | None = Field(
         description="Intersects output with this mask and if relative \
-            intersection < min_intersection this is set to 0",
+            intersection < min_intersection the object is deleted",
         default=None,
     )
-    min_intersection: float = Field(
+    min_intersection: float | None = Field(
         description="Minimum overlap for intersection", default=0.1
     )
     crop_from: str | None = Field(
