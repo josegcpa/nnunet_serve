@@ -11,4 +11,6 @@ if __name__ == "__main__":
         if "metadata" not in v:
             continue
         logger.info(f"Validating metadata for {k}")
-        SegWriter.init_from_metadata_dict(v["metadata"], validate=True)
+        seg_writer = SegWriter.init_from_metadata_dict(
+            v["metadata"], validate=True
+        )
