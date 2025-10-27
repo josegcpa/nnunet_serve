@@ -52,6 +52,7 @@ origins = ["http://localhost:8404"]
 
 logger = get_logger(__name__)
 
+PORT = os.environ.get("NNUNET_SERVE_PORT", 12345)
 TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 
@@ -212,6 +213,7 @@ class nnUNetAPI:
                     device_id=device_id,
                     params=params,
                     nnunet_path=nnunet_path,
+                    flip_xy=is_totalseg,
                 )
                 error = None
                 status = SUCCESS_STATUS
@@ -377,6 +379,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "nnunet_serve.nnunet_serve:create_app",
         host="0.0.0.0",
-        port=12345,
+        port=PORT,
         reload=True,
     )
