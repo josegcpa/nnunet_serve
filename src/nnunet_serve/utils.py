@@ -828,8 +828,8 @@ def make_parser(
     parser.add_argument(
         "--min_intersection",
         help="Minimum intersection over the union to keep a candidate.",
-        default=float_or_none,
-        type=float,
+        type=float_or_none,
+        default=0.1,
         nargs="+",
     )
     parser.add_argument(
