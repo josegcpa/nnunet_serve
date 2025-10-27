@@ -3,10 +3,12 @@ Command line utility to perform nnU-Net inference on a single study in SITK
 or DICOM format.
 """
 
-import torch
-import pprint
+import os
 import json
+import pprint
 import shutil
+import torch
+from pathlib import Path
 from nnunet_serve.utils import make_parser
 from nnunet_serve.nnunet_serve_utils import InferenceRequest
 from nnunet_serve.nnunet_serve import nnUNetAPI
@@ -48,7 +50,10 @@ def main(args):
     ]:
         if k in response:
             final_prediction = response[k][-1]
-            shutil.copy(final_prediction, args.output_dir)
+            name = Path(final_prediction).name
+            shutil.copy(final_prediction, os.path.join(args.output_dir, name))
+            response[f"{k}_final"] = name
+    del response["metadata"]
     return response
 
 
