@@ -3,9 +3,8 @@ import os
 import time
 
 import requests
-import SimpleITK as sitk
-from entrypoint import main
-from utils import export_dicom_files, export_proba_map_and_mask, make_parser
+from nnunet_serve.entrypoints.entrypoint import main
+from nnunet_serve.utils import make_parser
 
 
 class Timer:
@@ -29,96 +28,12 @@ def main_args(args):
     timer = Timer()
     # easier to adapt to docker
     if "SERIES_PATHS" in os.environ:
-        series_paths = os.environ["SERIES_PATHS"].split(" ")
-    else:
-        series_paths = args.series_paths
-    series_paths = [s.strip() for s in series_paths]
+        args.series_paths = os.environ["SERIES_PATHS"].split(" ")
 
-    args.output_dir = args.output_dir.strip().rstrip("/")
-    folds = []
-    for f in args.folds:
-        folds.append(int(f))
-
-    sitk_files, good_file_paths = main(
-        model_path=args.model_path.strip(),
-        series_paths=series_paths,
-        checkpoint_name=args.checkpoint_name.strip(),
-        output_dir=args.output_dir,
-        tmp_dir=args.tmp_dir,
-        is_dicom=args.is_dicom,
-        use_folds=folds,
-        use_mirroring=args.tta,
-        study_name=args.study_uid,
-    )
-
-    suffix = args.suffix
-    output_names = {
-        "prediction": (
-            "prediction" if suffix is None else f"prediction_{suffix}"
-        ),
-        "probabilities": (
-            "probabilities" if suffix is None else f"proba_{suffix}"
-        ),
-        "struct": "struct" if suffix is None else f"struct_{suffix}",
-    }
+    args.folds = [int(f) for f in args.folds]
+    main(args)
 
     timer.print_time()
-
-    proba_map, mask, empty = export_proba_map_and_mask(
-        sitk_files,
-        output_dir=args.output_dir,
-        min_confidence=args.min_confidence,
-        proba_threshold=args.proba_threshold,
-        intersect_with=args.intersect_with,
-        min_intersection=args.min_intersection,
-        output_proba_map_file_name=output_names["probabilities"],
-        output_mask_file_name=output_names["prediction"],
-        class_idx=args.class_idx,
-    )
-
-    timer.print_time()
-
-    if args.save_nifti_inputs is True:
-        for sitk_file in sitk_files:
-            basename = os.path.basename(sitk_file)
-            for s in [".mha", ".nii.gz"]:
-                basename = basename.rstrip(s)
-            output_nifti = f"{args.output_dir}/{basename}.nii.gz"
-            print(f"Copying Nifti to {output_nifti}")
-            sitk.WriteImage(sitk.ReadImage(sitk_file), output_nifti)
-
-        timer.print_time()
-
-    if (empty is True) and (args.empty_segment_metadata is not None):
-        metadata_path = args.empty_segment_metadata
-        fractional_metadata_path = args.empty_segment_metadata
-        save_dicom = True
-    elif empty is False:
-        metadata_path = args.metadata_path
-        fractional_metadata_path = args.fractional_metadata_path
-        save_dicom = True
-    else:
-        print("Mask is empty, skipping DICOM formats")
-        return "empty"
-
-    if save_dicom is True and args.is_dicom is True:
-        export_dicom_files(
-            output_dir=args.output_dir,
-            prediction_name=output_names["prediction"],
-            probabilities_name=output_names["probabilities"],
-            struct_name=output_names["struct"],
-            metadata_path=metadata_path,
-            fractional_metadata_path=fractional_metadata_path,
-            fractional_as_segments=args.fractional_as_segments,
-            dicom_file_paths=good_file_paths,
-            mask=mask,
-            proba_map=proba_map,
-            save_proba_map=args.proba_map,
-            save_rt_struct=args.rt_struct_output,
-            class_idx=args.class_idx,
-        )
-
-        timer.print_time()
 
     return args.success_message
 
