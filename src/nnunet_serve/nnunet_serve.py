@@ -19,7 +19,6 @@ import torch
 import uvicorn
 import yaml
 from totalsegmentator.map_to_binary import class_map
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from totalsegmentator.libs import download_pretrained_weights
 
@@ -47,8 +46,6 @@ torch.serialization.add_safe_globals(
         np.dtypes.Float32DType,
     ]
 )
-
-origins = ["http://localhost:8404"]
 
 logger = get_logger(__name__)
 
@@ -365,13 +362,6 @@ def create_app() -> fastapi.FastAPI:
     nnunet_api = nnUNetAPI(app)
     nnunet_api.init_api()
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
     return nnunet_api.app
 
 

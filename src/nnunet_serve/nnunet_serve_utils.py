@@ -101,10 +101,10 @@ class InferenceRequest(BaseModel):
     )
     intersect_with: str | None = Field(
         description="Intersects output with this mask and if relative \
-            intersection < min_overlap this is set to 0",
+            intersection < min_intersection this is set to 0",
         default=None,
     )
-    min_overlap: float = Field(
+    min_intersection: float = Field(
         description="Minimum overlap for intersection", default=0.1
     )
     crop_from: str | None = Field(
@@ -553,7 +553,7 @@ def predict(
         "intersect_with",
         "crop_from",
         "crop_padding",
-        "min_overlap",
+        "min_intersection",
         "cascade_mode",
         "flip_xy",
     ]
@@ -869,7 +869,7 @@ def single_model_inference(
     crop_from: str | sitk.Image | None = None,
     crop_class_idx: int = 1,
     crop_padding: tuple[int, int, int] | None = None,
-    min_overlap: float = 0.1,
+    min_intersection: float = 0.1,
     flip_xy: bool = False,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
     """
@@ -903,7 +903,7 @@ def single_model_inference(
         crop_class_idx (int | None, optional): class index for cropping. Defaults to None.
         crop_padding (tuple[int, int, int] | None, optional): padding to be
             added to the cropped region. Defaults to None.
-        min_overlap (float, optional): fraction of prediction which should
+        min_intersection (float, optional): fraction of prediction which should
             intersect with ``intersect_with``. Defaults to 0.1.
         prediction_name (str | None, optional): name of the prediction. Defaults
             to None.
@@ -993,7 +993,7 @@ def single_model_inference(
             min_confidence=min_confidence,
             proba_threshold=proba_threshold,
             intersect_with=intersect_with,
-            min_intersection=min_overlap,
+            min_intersection=min_intersection,
             class_idx=class_idx,
             output_padding=output_padding,
         )
@@ -1011,7 +1011,7 @@ def single_model_inference(
             mask_array,
             volumes[0],
             intersect_with=intersect_with,
-            min_intersection=min_overlap,
+            min_intersection=min_intersection,
             output_padding=output_padding,
         )
         probability_map = None
@@ -1054,7 +1054,7 @@ def multi_model_inference(
     proba_threshold: float | tuple[float] | list[float] = 0.1,
     min_confidence: float | tuple[float] | list[float] | None = None,
     intersect_with: str | sitk.Image | None = None,
-    min_overlap: float = 0.1,
+    min_intersection: float = 0.1,
     crop_from: str | sitk.Image | None = None,
     crop_padding: tuple[int, int, int] | None = None,
     cascade_mode: str = "intersect",
@@ -1084,7 +1084,7 @@ def multi_model_inference(
             minimum confidence to keep an object. Defaults to None.
         intersect_with (str | sitk.Image | None, optional): whether the
             prediction should intersect with a given object. Defaults to None.
-        min_overlap (float, optional): fraction of prediction which should
+        min_intersection (float, optional): fraction of prediction which should
             intersect with ``intersect_with``. Defaults to 0.1.
         crop_from (str | sitk.Image | None, optional): whether the
             input should be cropped centered on a given mask object. Defaults to None.
@@ -1166,7 +1166,7 @@ def multi_model_inference(
                 min_confidence=min_confidence[i],
                 intersect_with=intersect_with,
                 intersect_with_class_idx=intersect_with_class_idx,
-                min_overlap=min_overlap,
+                min_intersection=min_intersection,
                 crop_from=crop_from,
                 crop_class_idx=crop_class_idx,
                 crop_padding=crop_padding,
@@ -1203,7 +1203,7 @@ def multi_model_inference(
             proba_threshold=proba_threshold,
             min_confidence=min_confidence,
             intersect_with=intersect_with,
-            min_overlap=min_overlap,
+            min_intersection=min_intersection,
             crop_from=crop_from,
             crop_padding=crop_padding,
             flip_xy=flip_xy,
