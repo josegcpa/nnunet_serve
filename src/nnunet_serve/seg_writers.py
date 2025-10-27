@@ -439,7 +439,6 @@ class SegWriter:
             software_versions=self.algorithm_version,
             device_serial_number="42",
             series_description="Segmentation",
-            workers=8,
         )
         seg_dataset.ClinicalTrialSeriesID = self.clinical_trial_series_id
         seg_dataset.ClinicalTrialTimePointID = self.clinical_trial_time_point_id
