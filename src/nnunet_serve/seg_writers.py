@@ -17,7 +17,7 @@ import pydicom
 import pydicom_seg
 import SimpleITK as sitk
 from copy import deepcopy
-from pydicom import DataElement
+from pydicom import DataElement, Sequence
 from pydicom.sr.codedict import Code, codes
 from pydicom_seg.template import rgb_to_cielab
 from tqdm import tqdm
@@ -28,7 +28,7 @@ from nnunet_serve.coding import (
     CODING_SCHEME_INFORMATION_VR,
     NATURAL_LANGUAGE_TO_CODE,
 )
-from nnunet_serve.str_processing import to_camel_case
+from nnunet_serve.str_processing import to_camel_case, get_laterality
 from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -318,6 +318,7 @@ class SegWriter:
                 if category_concepts[k].value == category_number
             ][0]
             random_rgb_colour = random_color_generator()
+            laterality = get_laterality(segment_dict["label"])
             segment_description = hd.seg.SegmentDescription(
                 segment_number=segment_dict["number"],
                 segment_label=segment_dict["label"],
@@ -331,6 +332,10 @@ class SegWriter:
             segment_description.RecommendedDisplayCIELabValue = rgb_to_cielab(
                 random_rgb_colour
             )
+            if laterality is not None:
+                segment_description[0x0062, 0x0011] = Sequence(
+                    [LATERALITY_CODING[segment_dict["scheme"]][laterality]]
+                )
             csi = CODING_SCHEME_INFORMATION[segment_dict["scheme"]]
             for (
                 prop_type

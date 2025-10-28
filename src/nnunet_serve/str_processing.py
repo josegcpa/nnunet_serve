@@ -4,6 +4,12 @@ from copy import deepcopy
 def to_camel_case(snake_str: str) -> str:
     """
     Convert a snake_case string to a camelCase string.
+
+    Args:
+        snake_str (str): snake_case or space-separated string to convert.
+
+    Returns:
+        str: camel case string.
     """
     if snake_str == "adrenalgland":
         return "AdrenalGland"
@@ -16,3 +22,20 @@ def to_camel_case(snake_str: str) -> str:
         snake_str = snake_str.capitalize()
         return "".join(x.capitalize() for x in snake_str.lower().split(" "))
     return snake_str
+
+
+def get_laterality(string: str) -> str | None:
+    """
+    Get the laterality from a string.
+
+    Args:
+        string (str): string to get laterality from.
+
+    Returns:
+        str | None: laterality if found, None otherwise.
+    """
+    if "left" in string.lower():
+        return "Left"
+    elif "right" in string.lower():
+        return "Right"
+    return None
