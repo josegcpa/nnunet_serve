@@ -300,9 +300,11 @@ def remove_small_objects(
             i: np.sum(labels == i) for i in range(1, num_features + 1)
         }
         if isinstance(min_size, float):
-            min_size = int(min_size * max(label_sizes.values()))
+            curr_min_size = int(min_size * max(label_sizes.values()))
+        else:
+            curr_min_size = min_size
         for i in range(1, num_features + 1):
-            if label_sizes[i] < min_size:
+            if label_sizes[i] < curr_min_size:
                 image[labels == i] = 0
     return image
 
@@ -835,7 +837,7 @@ def make_parser(
     parser.add_argument(
         "--class_idx",
         help="Class index.",
-        default=1,
+        default="all",
         type=int_or_list_of_ints,
         nargs="+",
     )

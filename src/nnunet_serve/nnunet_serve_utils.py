@@ -11,7 +11,6 @@ from typing import Any, Union
 import numpy as np
 import SimpleITK as sitk
 import torch
-from copy import deepcopy
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from batchgenerators.dataloading.multi_threaded_augmenter import (
     MultiThreadedAugmenter,
@@ -72,9 +71,11 @@ class InferenceRequest(BaseModel):
         default=None,
     )
     output_dir: str = Field(description="Output directory.")
-    class_idx: int | list[int | None] | list[list[int] | int | None] = Field(
+    class_idx: int | list[int | None] | list[
+        list[int] | int | None
+    ] | None = Field(
         description="Prediction index or indices which are kept after each prediction",
-        default=1,
+        default=None,
     )
     checkpoint_name: str = Field(
         description="nnUNet checkpoint name", default="checkpoint_final.pth"
@@ -858,7 +859,7 @@ def single_model_inference(
     nnunet_path: str,
     volumes: list[sitk.Image],
     output_dir: str,
-    class_idx: int | list[int] = 1,
+    class_idx: int | list[int] | None = None,
     checkpoint_name: str = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
     use_folds: Folds = (0,),
@@ -1046,7 +1047,7 @@ def multi_model_inference(
     nnunet_path: str | list[str],
     series_paths: list[str] | list[list[str]],
     output_dir: str,
-    class_idx: int | list[int] | list[list[int]] = 1,
+    class_idx: int | list[int] | list[list[int]] | None = None,
     checkpoint_name: str = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
     is_dicom: bool = False,

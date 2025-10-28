@@ -155,7 +155,7 @@ class nnUNetAPI:
 
         # assign
         for k in default_params:
-            if k not in params:
+            if k not in inference_request.model_fields_set:
                 params[k] = default_params[k]
             else:
                 if params[k] is None:
