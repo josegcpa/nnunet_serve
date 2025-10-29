@@ -170,7 +170,7 @@ def filter_by_bvalue(
 def resample_image_to_target(
     moving: sitk.Image,
     target: sitk.Image,
-    is_label: bool = False,
+    is_mask: bool = False,
 ) -> sitk.Image:
     """
     Resamples a SimpleITK image to the space of a target image.
@@ -178,13 +178,13 @@ def resample_image_to_target(
     Args:
       moving: The SimpleITK image to resample.
       target: The target SimpleITK image to match.
-      is_label (bool): whether the moving image is a label mask.
+      is_mask (bool): whether the moving image is a label mask.
 
     Returns:
       The resampled SimpleITK image matching the target properties.
     """
-    if is_label:
-        interpolation = sitk.sitkNearestNeighbor
+    if is_mask:
+        interpolation = sitk.sitkLabelLinear
     else:
         interpolation = sitk.sitkBSpline
 
@@ -196,6 +196,8 @@ def resample_image(
     sitk_image: sitk.Image,
     out_spacing: Sequence[float] = [1.0, 1.0, 1.0],
     out_size: Sequence[int] = None,
+    out_direction: Sequence[float] = None,
+    out_origin: Sequence[float] = None,
     is_mask: bool = False,
     interpolator=sitk.sitkLinear,
 ) -> sitk.Image:
@@ -217,30 +219,25 @@ def resample_image(
     original_spacing = sitk_image.GetSpacing()
     original_size = sitk_image.GetSize()
 
+    if out_direction is None:
+        out_direction = sitk_image.GetDirection()
+
+    if out_origin is None:
+        out_origin = sitk_image.GetOrigin()
+
     if out_size is None:
         out_size = [
-            int(
-                np.round(
-                    original_size[0] * (original_spacing[0] / out_spacing[0])
-                )
-            ),
-            int(
-                np.round(
-                    original_size[1] * (original_spacing[1] / out_spacing[1])
-                )
-            ),
-            int(
-                np.round(
-                    original_size[2] * (original_spacing[2] / out_spacing[2])
-                )
-            ),
+            round(or_size * (or_spac / out_spac))
+            for or_size, or_spac, out_spac in zip(
+                original_size, original_spacing, out_spacing
+            )
         ]
 
     resample = sitk.ResampleImageFilter()
     resample.SetOutputSpacing(out_spacing)
     resample.SetSize(out_size)
-    resample.SetOutputDirection(sitk_image.GetDirection())
-    resample.SetOutputOrigin(sitk_image.GetOrigin())
+    resample.SetOutputDirection(out_direction)
+    resample.SetOutputOrigin(out_origin)
     resample.SetTransform(sitk.Transform())
     resample.SetDefaultPixelValue(0)
 
@@ -249,7 +246,7 @@ def resample_image(
     else:
         resample.SetInterpolator(interpolator)
 
-    output = resample.Execute(sitk_image)
+    output: sitk.Image = resample.Execute(sitk_image)
 
     return output
 
@@ -812,6 +809,7 @@ def make_parser(
         help="Defines the cascade mode. Must be either intersect or crop.",
         default="intersect",
         type=str,
+        nargs="+",
         choices=["intersect", "crop"],
     )
     parser.add_argument(
@@ -826,6 +824,13 @@ def make_parser(
         help="Crops the input to the bounding box of the SITK mask image in this path.",
         default=None,
         type=str,
+    )
+    parser.add_argument(
+        "--crop_padding",
+        help="Padding to be added to the cropped region.",
+        default=(10, 10, 10),
+        type=int,
+        nargs="+",
     )
     parser.add_argument(
         "--min_intersection",
