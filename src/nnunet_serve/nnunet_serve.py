@@ -152,14 +152,19 @@ class nnUNetAPI:
                 is_totalseg.append(nnunet_info.get("is_totalseg", False))
 
         default_params = get_default_params(default_args)
-
-        # assign
         for k in default_params:
             if k not in inference_request.model_fields_set:
                 params[k] = default_params[k]
             else:
                 if params[k] is None:
                     params[k] = default_params[k]
+
+        if params.get("save_proba_map", False) and all(
+            [x is None for x in params.get("proba_threshold", [])]
+        ):
+            raise ValueError(
+                "proba_threshold must be not-None if save_proba_map is True"
+            )
 
         series_paths, code, error_msg = get_series_paths(
             params["study_path"],
