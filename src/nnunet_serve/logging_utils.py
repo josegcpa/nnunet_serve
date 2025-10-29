@@ -25,11 +25,23 @@ def get_logger(log_name: str):
         logging.Logger: The logger.
     """
     logger = logging.getLogger(log_name)
-    logger.setLevel(os.environ.get("NNUNET_SERVE_LOGGING_LEVEL", logging.INFO))
+    level_env = os.environ.get("NNUNET_SERVE_LOGGING_LEVEL", "INFO")
+    if isinstance(level_env, str):
+        level = getattr(logging, level_env.upper(), logging.INFO)
+    else:
+        try:
+            level = int(level_env)
+        except Exception:
+            level = logging.INFO
+    logger.setLevel(level)
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
+    has_stream = any(
+        isinstance(h, logging.StreamHandler) for h in logger.handlers
+    )
+    if not has_stream:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
 
     return logger
 
