@@ -543,9 +543,9 @@ def predict(
     params: dict,
     nnunet_path: str | list[str],
     flip_xy: bool | list[bool] = False,
-) -> list[str]:
+) -> dict:
     """
-    Runs the prediction for a set of models.
+    Runs the prediction for a set of models and returns exported output paths.
 
     Args:
         series_paths (list): paths to series.
@@ -560,22 +560,25 @@ def predict(
             inference. Defaults to False.
 
     Returns:
-        list[str]: list of output paths.
+        dict: mapping of output artifact keys to lists of paths.
     """
     if not torch.cuda.is_available():
         raise RuntimeError(
             "CUDA is not available but GPU inference was requested"
         )
-    predictor = nnUNetPredictor(
-        tile_step_size=0.5,
-        use_gaussian=True,
-        use_mirroring=mirroring,
-        device=torch.device("cuda", device_id),
-        perform_everything_on_device=True,
-        verbose=False,
-        verbose_preprocessing=False,
-        allow_tqdm=True,
-    )
+    try:
+        predictor = nnUNetPredictor(
+            tile_step_size=0.5,
+            use_gaussian=True,
+            use_mirroring=mirroring,
+            device=torch.device("cuda", device_id),
+            perform_everything_on_device=True,
+            verbose=False,
+            verbose_preprocessing=False,
+            allow_tqdm=True,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to initialize nnUNetPredictor: {e}") from e
 
     inference_param_names = [
         "output_dir",
@@ -628,27 +631,39 @@ def predict(
     else:
         seg_writers = None
 
-    (
-        all_predictions,
-        all_proba_maps,
-        good_file_paths,
-        all_volumes,
-    ) = multi_model_inference(
-        series_paths=series_paths,
-        predictor=predictor,
-        nnunet_path=nnunet_path,
-        flip_xy=flip_xy,
-        **inference_params,
-    )
+    try:
+        (
+            all_predictions,
+            all_proba_maps,
+            good_file_paths,
+            all_volumes,
+        ) = multi_model_inference(
+            series_paths=series_paths,
+            predictor=predictor,
+            nnunet_path=nnunet_path,
+            flip_xy=flip_xy,
+            **inference_params,
+        )
+    except torch.cuda.OutOfMemoryError as e:
+        raise RuntimeError(
+            "CUDA out of memory during inference. Consider reducing input size or TTA."
+        ) from e
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Input file or model path not found: {e}") from e
+    except Exception as e:
+        raise RuntimeError(f"Inference failed: {e}") from e
 
-    output_paths = export_predictions(
-        masks=all_predictions,
-        proba_maps=all_proba_maps,
-        good_file_paths=good_file_paths,
-        volumes=all_volumes,
-        seg_writers=seg_writers,
-        **export_params,
-    )
+    try:
+        output_paths = export_predictions(
+            masks=all_predictions,
+            proba_maps=all_proba_maps,
+            good_file_paths=good_file_paths,
+            volumes=all_volumes,
+            seg_writers=seg_writers,
+            **export_params,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to export predictions: {e}") from e
 
     del predictor
     if torch.cuda.is_available():
@@ -682,7 +697,7 @@ def get_crop(
         image = resample_image_to_target(
             image, target=target_image, is_mask=True
         )
-    target_image_size = target_image.GetSize()
+    target_image_size = image.GetSize()
     labelimfilter = sitk.LabelShapeStatisticsImageFilter()
     labelimfilter.Execute(image)
     bounding_box = labelimfilter.GetBoundingBox(1)
@@ -767,12 +782,10 @@ def process_proba_array(
     min_intersection: float = 0.1,
     class_idx: int | list[int] | None = None,
     output_padding: list[int] | None = None,
-) -> sitk.Image:
+) -> tuple[sitk.Image, sitk.Image, bool]:
     """
-    Exports a SITK probability mask and the corresponding prediction. Applies a
-    candidate extraction protocol (i.e. filtering probabilities above
-    proba_threshold, applying connected component analysis and filtering out
-    objects whose maximum probability is lower than min_confidence).
+    Exports a SITK probability mask and the corresponding probability map.
+    Applies a candidate extraction protocol (threshold, CC analysis, min_confidence).
 
     Args:
         array (np.ndarray): an array corresponding to a probability map.
@@ -792,8 +805,7 @@ def process_proba_array(
             output mask. Defaults to None.
 
     Returns:
-        sitk.Image: returns the probability mask after the candidate extraction
-            protocol.
+        tuple[sitk.Image, sitk.Image, bool]: (mask, proba_map, empty_flag)
     """
     logger.info("Exporting probability map and mask")
     empty = False
@@ -839,12 +851,9 @@ def process_mask(
     intersect_with: str | sitk.Image | None = None,
     min_intersection: float = 0.1,
     output_padding: tuple[int, int, int, int, int, int] | None = None,
-) -> sitk.Image:
+) -> tuple[sitk.Image, bool]:
     """
-    Exports a SITK probability mask and the corresponding prediction. Applies a
-    candidate extraction protocol (i.e. filtering probabilities above
-    proba_threshold, applying connected component analysis and filtering out
-    objects whose maximum probability is lower than min_confidence).
+    Processes a mask array and returns a SITK mask image.
 
     Args:
         mask_array (np.ndarray): an array corresponding to a mask.

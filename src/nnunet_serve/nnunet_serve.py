@@ -316,14 +316,28 @@ def get_model_dictionary() -> tuple[dict, dict]:
     model_spec_path = os.environ.get(
         "MODEL_SERVE_SPEC", "model-serve-spec.yaml"
     )
-    with open(model_spec_path) as o:
-        models_specs = yaml.safe_load(o)
+    if not os.path.exists(model_spec_path):
+        raise FileNotFoundError(
+            f"Model spec file not found at '{model_spec_path}'. Set MODEL_SERVE_SPEC or place model-serve-spec.yaml in CWD."
+        )
+    try:
+        with open(model_spec_path) as o:
+            models_specs = yaml.safe_load(o)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read/parse model spec YAML: {e}") from e
+    if not isinstance(models_specs, dict):
+        raise ValueError(
+            "Model spec must be a YAML mapping/dictionary at top level"
+        )
+    if "model_folder" not in models_specs or "models" not in models_specs:
+        raise ValueError("Model spec must define 'model_folder' and 'models'")
+    if (
+        not isinstance(models_specs["models"], list)
+        or len(models_specs["models"]) == 0
+    ):
+        raise ValueError("Model spec 'models' must be a non-empty list")
     totalseg_dir = get_totalseg_dir(models_specs)
     alias_dict = {}
-    if "model_folder" not in models_specs:
-        raise ValueError(
-            "model_folder must be specified in model-serve-spec.yaml"
-        )
     for model in models_specs["models"]:
         k = model["id"]
         model["is_totalseg"] = model.get("is_totalseg", False)
