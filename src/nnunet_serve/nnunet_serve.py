@@ -33,6 +33,7 @@ from nnunet_serve.nnunet_serve_utils import (
     FAILURE_STATUS,
     SUCCESS_STATUS,
     InferenceRequest,
+    get_gpu_memory,
     get_default_params,
     get_info,
     get_series_paths,
@@ -98,6 +99,18 @@ class nnUNetAPI:
             methods=["GET"],
             response_model=dict[str, Any],
         )
+        self.app.add_api_route(
+            "/healthz",
+            self.healthz,
+            methods=["GET"],
+            response_model=dict[str, Any],
+        )
+        self.app.add_api_route(
+            "/readyz",
+            self.readyz,
+            methods=["GET"],
+            response_model=dict[str, Any],
+        )
 
     def model_info(self):
         """
@@ -116,6 +129,33 @@ class nnUNetAPI:
             dict: Request parameters.
         """
         return InferenceRequest.model_json_schema()
+
+    def healthz(self):
+        return {"status": "ok"}
+
+    def readyz(self):
+        models_loaded = bool(self.model_dictionary)
+        gpu_available = False
+        max_free_mem = None
+        try:
+            if torch.cuda.is_available():
+                mem = get_gpu_memory()
+                gpu_available = len(mem) > 0
+                max_free_mem = max(mem) if mem else None
+        except Exception:
+            gpu_available = False
+        status = (
+            "ok"
+            if models_loaded
+            and (gpu_available or not torch.cuda.is_available())
+            else "starting"
+        )
+        return {
+            "status": status,
+            "models_loaded": models_loaded,
+            "gpu_available": gpu_available,
+            "max_free_mem": max_free_mem,
+        }
 
     def infer(self, inference_request: InferenceRequest):
         """
