@@ -35,7 +35,6 @@ from nnunet_serve.utils import (
     read_dicom_as_sitk,
     resample_image_to_target,
     resample_image,
-    resample_sitk_bicubic,
     remove_small_objects,
 )
 
@@ -116,7 +115,7 @@ class InferenceRequest(BaseModel):
         description="Padding to be added to the cropped region",
         default=(10, 10, 10),
     )
-    cascade_mode: CascadeMode = Field(
+    cascade_mode: CascadeMode | list[CascadeMode] = Field(
         description="Whether to crop inputs to consecutive bounding boxes "
         "or to intersect consecutive outputs.",
         default=CascadeMode.INTERSECT,
@@ -142,7 +141,9 @@ class InferenceRequest(BaseModel):
             raise ValueError(
                 "proba_threshold must be not-None if save_proba_map is True"
             )
-        self.cascade_mode = self.cascade_mode.value
+        if isinstance(self.cascade_mode, list) is False:
+            self.cascade_mode = [self.cascade_mode]
+        self.cascade_mode = [mode.value for mode in self.cascade_mode]
 
 
 def to_closest_canonical_sitk(
@@ -359,14 +360,27 @@ def predict_from_data_iterator_local(
 
 
 def filter_labels(
-    image: sitk.Image, class_idx: int | list[int], binarize: bool = False
+    image: sitk.Image, class_idx: int | list[int] | None, binarize: bool = False
 ) -> sitk.Image:
+    """
+    Filters labels in an image.
+
+    Args:
+        image (sitk.Image): Image to filter.
+        class_idx (int | list[int] | None): List of class indices to keep.
+        binarize (bool, optional): Whether to binarize the image. Defaults to False.
+
+    Returns:
+        sitk.Image: Filtered image.
+    """
     stats = sitk.LabelShapeStatisticsImageFilter()
     all_labels = []
     stats.Execute(image)
     image = sitk.Cast(image, sitk.sitkLabelUInt16)
     for label in stats.GetLabels():
         all_labels.append(label)
+    if class_idx is None:
+        class_idx = all_labels
     if isinstance(class_idx, int):
         class_idx = [class_idx]
     mapping = {int(i): int(i) if i in class_idx else 0 for i in all_labels}
@@ -432,11 +446,14 @@ def get_series_paths(
         study_path = [study_path for _ in range(n)]
         series_paths = []
         if n != len(series_folders):
-            return (
-                None,
-                FAILURE_STATUS,
-                "series_folders and nnunet_id must be the same length",
-            )
+            if len(series_folders) == 1:
+                series_folders = [series_folders[0] for _ in range(n)]
+            else:
+                return (
+                    None,
+                    FAILURE_STATUS,
+                    "series_folders and nnunet_id must be the same length",
+                )
         for i in range(len(study_path)):
             series_paths.append(
                 [os.path.join(study_path[i], x) for x in series_folders[i]]
@@ -643,17 +660,9 @@ def get_crop(
     if isinstance(image, str):
         image = sitk.ReadImage(image)
     if target_image is not None:
-        # check if resampling is required
-        if any(
-            [
-                image.GetSpacing() != target_image.GetSpacing(),
-                image.GetOrigin() != target_image.GetOrigin(),
-                image.GetDirection() != target_image.GetDirection(),
-            ]
-        ):
-            image = resample_image_to_target(
-                image, target=target_image, is_label=True
-            )
+        image = resample_image_to_target(
+            image, target=target_image, is_mask=True
+        )
     target_image_size = target_image.GetSize()
     labelimfilter = sitk.LabelShapeStatisticsImageFilter()
     labelimfilter.Execute(image)
@@ -834,7 +843,7 @@ def process_mask(
         sitk.Image: returns the probability mask after the candidate extraction
             protocol.
     """
-    logger.info("Exporting mask")
+    logger.info("Processing mask")
     empty = False
     if intersect_with is not None:
         mask_array = intersect(mask_array, intersect_with, min_intersection)
@@ -928,7 +937,9 @@ def single_model_inference(
     )
     input_spacing = volumes[0].GetSpacing()
     original_size = volumes[0].GetSize()
-    spacing = predictor.configuration_manager.spacing
+    original_direction = volumes[0].GetDirection()
+    original_origin = volumes[0].GetOrigin()
+    spacing = predictor.configuration_manager.spacing[::-1]
 
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
@@ -941,14 +952,18 @@ def single_model_inference(
     output_padding = None
     if crop_from is not None:
         logger.info("Cropping input")
+        logger.info("Input size (before cropping): %s", volumes[0].GetSize())
         crop_from = filter_labels(crop_from, crop_class_idx, True)
         bb, output_padding = get_crop(crop_from, volumes[0], crop_padding)
         volumes = [
             v[bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]] for v in volumes
         ]
+        logger.info("Input size (after cropping): %s", volumes[0].GetSize())
 
     logger.info("Resampling input images to nnUNet model spacing")
-    volumes = [resample_sitk_bicubic(volume, spacing) for volume in volumes]
+    logger.info("Input size (before resampling): %s", volumes[0].GetSize())
+
+    volumes = [resample_image(volume, spacing) for volume in volumes]
     logger.info("Running inference using %s", nnunet_path)
     input_array = np.stack([sitk.GetArrayFromImage(v) for v in volumes])
     image_properties = {
@@ -957,11 +972,11 @@ def single_model_inference(
         "direction": volumes[0].GetDirection(),
         "size": volumes[0].GetSize(),
     }
-    logger.info("Input shape: %s", input_array.shape)
+    logger.info("Input size: %s", volumes[0].GetSize())
     logger.info("Input spacing: %s", volumes[0].GetSpacing())
     logger.info("Input origin: %s", volumes[0].GetOrigin())
     logger.info("Input direction: %s", volumes[0].GetDirection())
-    logger.info("Input size: %s", volumes[0].GetSize())
+    logger.info("Input shape (array): %s", input_array.shape)
     logger.info("nnUNet: creating data iterator")
     if flip_xy:
         input_array = input_array[:, :, ::-1, ::-1]
@@ -984,6 +999,12 @@ def single_model_inference(
 
     logger.info("nnUNet: inference done")
 
+    resample_kwargs = {
+        "out_spacing": input_spacing,
+        "out_size": original_size,
+        "out_direction": original_direction,
+        "out_origin": original_origin,
+    }
     if proba_threshold is not None:
         intersect_with = filter_labels(
             intersect_with, intersect_with_class_idx, True
@@ -999,13 +1020,14 @@ def single_model_inference(
             output_padding=output_padding,
         )
         mask = resample_image(
-            mask, input_spacing, out_size=original_size, is_mask=True
+            mask,
+            is_mask=True,
+            **resample_kwargs,
         )
         probability_map = resample_image(
             probability_map,
-            input_spacing,
-            out_size=original_size,
             is_mask=False,
+            **resample_kwargs,
         )
     else:
         mask, _ = process_mask(
@@ -1017,7 +1039,9 @@ def single_model_inference(
         )
         probability_map = None
         mask = resample_image(
-            mask, input_spacing, out_size=original_size, is_mask=True
+            mask,
+            is_mask=True,
+            **resample_kwargs,
         )
 
     if probability_map is not None:
@@ -1058,7 +1082,7 @@ def multi_model_inference(
     min_intersection: float = 0.1,
     crop_from: str | sitk.Image | None = None,
     crop_padding: tuple[int, int, int] | None = None,
-    cascade_mode: str = "intersect",
+    cascade_mode: str | list[str] = "intersect",
     flip_xy: bool = False,
 ):
     """
@@ -1091,8 +1115,8 @@ def multi_model_inference(
             input should be cropped centered on a given mask object. Defaults to None.
         crop_padding (tuple[int, int, int] | None, optional): padding to be
             added to the cropped region. Defaults to None.
-        cascade_mode (str, optional): whether to crop inputs to consecutive bounding boxes
-            or to intersect consecutive outputs. Defaults to "intersect".
+        cascade_mode (str | list[str], optional): whether to crop inputs to consecutive
+            bounding boxes or to intersect consecutive outputs. Defaults to "intersect".
         flip_xy (bool, optional): whether to flip the x and y axes of the input.
             TotalSegmentator does this for some reason. Defaults to False.
     """
@@ -1176,11 +1200,11 @@ def multi_model_inference(
             all_predictions.append(mask)
             all_proba_maps.append(proba_map)
             if i < (len(nnunet_path) - 1):
-                if cascade_mode == "intersect":
+                if "intersect" in cascade_mode:
                     logger.info("Using mask for intersection")
                     intersect_with = mask
                     intersect_with_class_idx = class_idx_list[i]
-                elif cascade_mode == "crop":
+                if "crop" in cascade_mode:
                     logger.info("Using mask for cropping")
                     crop_from = mask
                     crop_class_idx = class_idx_list[i]
