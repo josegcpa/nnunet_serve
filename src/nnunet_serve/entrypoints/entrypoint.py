@@ -4,6 +4,7 @@ or DICOM format.
 """
 
 import os
+import sys
 import json
 import pprint
 import shutil
@@ -31,6 +32,7 @@ def main(args):
         intersect_with=args.intersect_with,
         min_intersection=args.min_intersection,
         crop_from=args.crop_from,
+        crop_padding=args.crop_padding,
         min_confidence=args.min_confidence,
         cascade_mode=args.cascade_mode,
         save_proba_map=args.proba_map,
@@ -38,6 +40,14 @@ def main(args):
         save_rt_struct_output=args.rt_struct_output,
         suffix=args.suffix,
     )
+
+    all_set_args = [k.lstrip("-") for k in sys.argv[1:] if "-" in k]
+    # ensures that only the arguments that were set in the CLI are actually used
+    inference_request.__pydantic_fields_set__ = [
+        k
+        for k in inference_request.__pydantic_fields_set__
+        if k in all_set_args
+    ]
 
     response = nnunet_api.infer(inference_request)
     response = json.loads(response.body.decode("utf-8"))
