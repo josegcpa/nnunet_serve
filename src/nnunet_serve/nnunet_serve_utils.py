@@ -51,7 +51,7 @@ class CascadeMode(Enum):
     CROP = "crop"
 
 
-class InferenceRequest(BaseModel):
+class InferenceRequestBase(BaseModel):
     """
     Data model for the inference request from local data. Supports providing
     multiple nnUNet model identifiers (``nnunet_id``) which in turn allows for
@@ -63,13 +63,6 @@ class InferenceRequest(BaseModel):
     nnunet_id: str | list[str] = Field(
         description="nnUnet model identifier or list of nnUNet model identifiers."
     )
-    study_path: str = Field(
-        description="Path to study folder or list of paths to studies."
-    )
-    series_folders: list[str] | list[list[str]] = Field(
-        description="Series folder names or list of series folder names (relative to study_path).",
-        default=None,
-    )
     output_dir: str = Field(description="Output directory.")
     class_idx: int | list[int | None] | list[
         list[int] | int | None
@@ -77,7 +70,7 @@ class InferenceRequest(BaseModel):
         description="Prediction index or indices which are kept after each prediction",
         default=None,
     )
-    checkpoint_name: str = Field(
+    checkpoint_name: str | list[str] = Field(
         description="nnUNet checkpoint name", default="checkpoint_final.pth"
     )
     tmp_dir: str = Field(
@@ -145,6 +138,27 @@ class InferenceRequest(BaseModel):
         if isinstance(self.cascade_mode, list) is False:
             self.cascade_mode = [self.cascade_mode]
         self.cascade_mode = [mode.value for mode in self.cascade_mode]
+
+
+class InferenceRequest(InferenceRequestBase):
+    study_path: str = Field(
+        description="Path to study folder or list of paths to studies."
+    )
+    series_folders: list[str] | list[list[str]] = Field(
+        description="Series folder names or list of series folder names (relative to study_path).",
+        default=None,
+    )
+
+
+class InferenceRequestFile(InferenceRequestBase):
+    study_path: str | None = Field(
+        description="Path to study folder or list of paths to studies.",
+        default=None,
+    )
+    series_folders: list[str] | list[list[str]] | None = Field(
+        description="Series folder names or list of series folder names (relative to study_path).",
+        default=None,
+    )
 
 
 def to_closest_canonical_sitk(
@@ -1100,7 +1114,7 @@ def multi_model_inference(
     series_paths: list[str] | list[list[str]],
     output_dir: str,
     class_idx: int | list[int] | list[list[int]] | None = None,
-    checkpoint_name: str = "checkpoint_best.pth",
+    checkpoint_name: str | list[str] = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
     is_dicom: bool = False,
     use_folds: tuple[int] = (0,),
@@ -1124,8 +1138,8 @@ def multi_model_inference(
         output_dir (str): output directory.
         class_idx (int | list[int] | list[list[int]], optional): class index to
             export probability maps. Defaults to 1.
-        checkpoint_name (str, optional): name of nnUNet checkpoint. Defaults to
-            "checkpoint_best.pth".
+        checkpoint_name (str | list[str], optional): name of nnUNet checkpoint.
+            Defaults to "checkpoint_best.pth".
         tmp_dir (str, optional): temporary directory. Defaults to ".tmp".
         is_dicom (bool, optional): whether the input/output is DICOM. Defaults
             to False.
@@ -1181,6 +1195,9 @@ def multi_model_inference(
             class_idx_list = class_idx
         proba_threshold = coherce_to_list(proba_threshold, len(nnunet_path))
         min_confidence = coherce_to_list(min_confidence, len(nnunet_path))
+        checkpoint_name_list = coherce_to_list(
+            checkpoint_name, len(nnunet_path)
+        )
 
         if series_paths_list is None:
             raise ValueError(
@@ -1211,7 +1228,7 @@ def multi_model_inference(
                 nnunet_path=nnunet_path[i],
                 volumes=all_volumes[i],
                 class_idx=class_idx_list[i],
-                checkpoint_name=checkpoint_name,
+                checkpoint_name=checkpoint_name_list[i],
                 output_dir=out,
                 tmp_dir=os.path.join(tmp_dir, f"stage_{i}"),
                 use_folds=use_folds,
