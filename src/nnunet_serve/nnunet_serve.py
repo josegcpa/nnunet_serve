@@ -49,7 +49,7 @@ torch.serialization.add_safe_globals(
 
 logger = get_logger(__name__)
 
-PORT = os.environ.get("NNUNET_SERVE_PORT", 12345)
+PORT = int(os.environ.get("NNUNET_SERVE_PORT", "12345"))
 TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 
