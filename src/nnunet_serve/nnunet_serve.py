@@ -8,22 +8,28 @@ where nnunet_serve is utilized.
 import os
 import re
 import time
+import json
+import uuid
 import importlib
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from glob import glob
 
-import fastapi
 import numpy as np
+import sqlite3
+import fastapi
 import torch
 import uvicorn
 import yaml
-from totalsegmentator.map_to_binary import class_map
-from fastapi.responses import JSONResponse
-from totalsegmentator.libs import download_pretrained_weights
 from pydantic import BaseModel, ConfigDict
+from fastapi import UploadFile, File, Request
+from fastapi.responses import JSONResponse, FileResponse
+from totalsegmentator.map_to_binary import class_map
+from totalsegmentator.libs import download_pretrained_weights
 from typing import Any
 
+from nnunet_serve.file_utils import store_uploaded_file, zip_directory
 from nnunet_serve.totalseg_utils import (
     TASK_CONVERSION,
     load_snomed_mapping_expanded,
@@ -74,6 +80,60 @@ class nnUNetAPI:
 
     def __post_init__(self):
         self.model_dictionary, self.alias_dict = get_model_dictionary()
+        # Initialise SQLite DB for zip storage
+        self._db_path = Path("/tmp/nnunet/zip_store.db")
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db_conn = sqlite3.connect(self._db_path)
+        self._init_db()
+
+    def _init_db(self) -> None:
+        """Create the zip_store table if it does not exist.
+        Schema: job_id TEXT PRIMARY KEY, created_at DATE, zip_path TEXT
+        """
+        cur = self._db_conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS zip_store (
+                job_id TEXT PRIMARY KEY,
+                created_at DATE,
+                zip_path TEXT
+            )
+            """
+        )
+        self._db_conn.commit()
+
+    def _store_zip(self, job_id: str, zip_path: Path) -> None:
+        """Insert a new record for a generated zip file.
+        ``created_at`` is stored as ISO date (YYYY‑MM‑DD).
+        """
+        cur = self._db_conn.cursor()
+        cur.execute(
+            "INSERT OR REPLACE INTO zip_store (job_id, created_at, zip_path) VALUES (?, ?, ?)",
+            (job_id, datetime.date.today().isoformat(), str(zip_path)),
+        )
+        self._db_conn.commit()
+
+    def _get_zip_path(self, job_id: str) -> Path | None:
+        """Retrieve the zip path for ``job_id`` or ``None`` if not found."""
+        cur = self._db_conn.cursor()
+        cur.execute(
+            "SELECT zip_path FROM zip_store WHERE job_id = ?", (job_id,)
+        )
+        row = cur.fetchone()
+        return Path(row[0]) if row else None
+
+    def cleanup_old_records(self, days: int) -> int:
+        """Delete records older than *days*.
+        Returns the number of rows removed.
+        """
+        cutoff = datetime.date.today() - datetime.timedelta(days=days)
+        cur = self._db_conn.cursor()
+        cur.execute(
+            "DELETE FROM zip_store WHERE created_at < ?", (cutoff.isoformat(),)
+        )
+        removed = cur.rowcount
+        self._db_conn.commit()
+        return removed
 
     def init_api(self):
         """
@@ -86,6 +146,20 @@ class nnUNetAPI:
             self.infer,
             methods=["POST"],
             response_model=InferenceResponse,
+        )
+        # New endpoint that accepts a file upload and runs inference, returning a job_id
+        self.app.add_api_route(
+            "/infer_file",
+            self.infer_file,
+            methods=["POST"],
+            response_model=dict[str, Any],
+        )
+        # Endpoint to download the zip produced for a given job_id
+        self.app.add_api_route(
+            "/download/{job_id}",
+            self.download_file,
+            methods=["GET"],
+            response_class=FileResponse,
         )
         self.app.add_api_route(
             "/model_info",
@@ -335,11 +409,100 @@ class nnUNetAPI:
             return JSONResponse(content=payload, status_code=500)
         return JSONResponse(content=payload, status_code=200)
 
+    async def infer_file(
+        self,
+        inference_request: Request,
+        file: UploadFile = File(...),
+    ):
+        """Accept a file (or archive) upload, stores it, builds an InferenceRequest,
+        and delegates to the existing ``infer`` method.
+        """
+
+        random_uuid = uuid.uuid4().hex
+        form = await inference_request.form()
+        json_str = form.get("request")
+        if json_str is not None:
+            payload = json.loads(json_str)
+        else:
+            payload = await inference_request.json()
+        payload["output_dir"] = os.path.join(
+            "/tmp/nnunet/", random_uuid, "output"
+        )
+
+        try:
+            inference_req = InferenceRequest(**payload)
+        except Exception as exc:
+            return fastapi.responses.JSONResponse(
+                content={
+                    "time_elapsed": None,
+                    "gpu": None,
+                    "nnunet_path": None,
+                    "metadata": None,
+                    "request": payload,
+                    "status": FAILURE_STATUS,
+                    "error": f"Invalid request payload: {exc}",
+                },
+                status_code=422,
+            )
+
+        try:
+            temp_path = store_uploaded_file(file, job_id=random_uuid)
+        except Exception as exc:
+            return fastapi.responses.JSONResponse(
+                content={
+                    "time_elapsed": None,
+                    "gpu": None,
+                    "nnunet_path": None,
+                    "metadata": None,
+                    "request": {},
+                    "status": FAILURE_STATUS,
+                    "error": f"Failed to store uploaded file: {exc}",
+                },
+                status_code=400,
+            )
+
+        inference_req.study_path = str(temp_path)
+
+        response = self.infer(inference_req)
+
+        job_id = uuid.uuid4().hex
+        if response.status_code == 200:
+            zip_path = zip_directory(Path(inference_req.output_dir))
+            self._store_zip(job_id, zip_path)
+            shutil.rmtree(inference_req.study_path)
+            shutil.rmtree(inference_req.output_dir)
+            original = json.loads(response.body)
+            original.update({"job_id": job_id})
+            return JSONResponse(content=original, status_code=200)
+        else:
+            error_payload = json.loads(response.body)
+            error_payload.update({"job_id": job_id})
+            return JSONResponse(
+                content=error_payload, status_code=response.status_code
+            )
+
+    async def download_file(self, job_id: str):
+        """Serve the zip file created for ``job_id``.
+        Returns 404 if the ``job_id`` is unknown or the file has been cleaned up.
+        """
+        zip_path = self._get_zip_path(job_id)
+        if not zip_path or not zip_path.exists():
+            raise fastapi.HTTPException(
+                status_code=404, detail="Zip not found for job_id"
+            )
+        return FileResponse(
+            path=zip_path, media_type="application/zip", filename=zip_path.name
+        )
+
+    def __del__(self):
+        self._db_conn.close()
+
 
 def get_totalseg_dir(model_specs: dict):
     weights_key = "TOTALSEG_WEIGHTS_PATH"
     if weights_key in os.environ:
         return os.environ[weights_key]
+
     os.environ[weights_key] = os.path.join(
         model_specs["model_folder"], "totalseg"
     )
