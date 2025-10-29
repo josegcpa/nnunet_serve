@@ -8,7 +8,7 @@
   "BodyPartExamined": "Abdomen",
   "Manufacturer": "",
   "InstitutionName": "Champalimaud Foundation",
-  "ImageComments": "Multiclass segmentation",
+  "ImageComments": "Fractional segmentation",
   "segmentAttributes": [
     [
       {
