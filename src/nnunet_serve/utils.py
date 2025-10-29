@@ -35,10 +35,11 @@ def float_or_none(x: str) -> float | None:
 
 
 def int_or_list_of_ints(x: str) -> int | list[int]:
+    x = x.replace(" ", "").strip(",")
     if x.lower() == "all":
         return None
     if "," in x:
-        return [int(y) for y in x.split(",")]
+        return list(set([int(y) for y in x.split(",")]))
     return int(x)
 
 
@@ -750,7 +751,7 @@ def make_parser(
         "-f",
         help="Sets which folds should be used with nnUNet",
         nargs="+",
-        type=str,
+        type=int_or_list_of_ints,
         default=(0,),
     )
     parser.add_argument(
