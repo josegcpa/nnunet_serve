@@ -21,6 +21,8 @@ import yaml
 from totalsegmentator.map_to_binary import class_map
 from fastapi.responses import JSONResponse
 from totalsegmentator.libs import download_pretrained_weights
+from pydantic import BaseModel, ConfigDict
+from typing import Any
 
 from nnunet_serve.totalseg_utils import (
     TASK_CONVERSION,
@@ -53,6 +55,18 @@ PORT = int(os.environ.get("NNUNET_SERVE_PORT", "12345"))
 TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 
+class InferenceResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    time_elapsed: float | None
+    gpu: int | None
+    nnunet_path: str | list[str] | None
+    metadata: Any | None
+    request: dict
+    status: str
+    error: str | None
+
+
 @dataclass
 class nnUNetAPI:
     app: fastapi.FastAPI | None = None
@@ -66,10 +80,23 @@ class nnUNetAPI:
         """
         if self.app is None:
             raise ValueError("app must be defined before init_api is called")
-        self.app.add_api_route("/infer", self.infer, methods=["POST"])
-        self.app.add_api_route("/model_info", self.model_info, methods=["GET"])
         self.app.add_api_route(
-            "/request-params", self.request_params, methods=["GET"]
+            "/infer",
+            self.infer,
+            methods=["POST"],
+            response_model=InferenceResponse,
+        )
+        self.app.add_api_route(
+            "/model_info",
+            self.model_info,
+            methods=["GET"],
+            response_model=dict[str, Any],
+        )
+        self.app.add_api_route(
+            "/request-params",
+            self.request_params,
+            methods=["GET"],
+            response_model=dict[str, Any],
         )
 
     def model_info(self):
@@ -114,7 +141,7 @@ class nnUNetAPI:
                         "status": FAILURE_STATUS,
                         "error": f"{nnunet_id} is not a valid nnunet_id",
                     },
-                    status_code=400,
+                    status_code=404,
                 )
             nnunet_info = self.model_dictionary[self.alias_dict[nnunet_id]]
             nnunet_path = nnunet_info["path"]
@@ -140,7 +167,7 @@ class nnUNetAPI:
                             "status": FAILURE_STATUS,
                             "error": f"{nn} is not a valid nnunet_id",
                         },
-                        status_code=400,
+                        status_code=404,
                     )
                 nnunet_info = self.model_dictionary[self.alias_dict[nn]]
                 nnunet_path.append(nnunet_info["path"])
@@ -162,8 +189,17 @@ class nnUNetAPI:
         if params.get("save_proba_map", False) and all(
             [x is None for x in params.get("proba_threshold", [])]
         ):
-            raise ValueError(
-                "proba_threshold must be not-None if save_proba_map is True"
+            return JSONResponse(
+                content={
+                    "time_elapsed": None,
+                    "gpu": None,
+                    "nnunet_path": None,
+                    "metadata": None,
+                    "status": FAILURE_STATUS,
+                    "request": inference_request.__dict__,
+                    "error": "proba_threshold must be not-None if save_proba_map is True",
+                },
+                status_code=400,
             )
 
         series_paths, code, error_msg = get_series_paths(
