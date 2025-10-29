@@ -11,7 +11,7 @@ import shutil
 import torch
 from pathlib import Path
 from nnunet_serve.utils import make_parser
-from nnunet_serve.nnunet_serve_utils import InferenceRequest
+from nnunet_serve.nnunet_serve_utils import InferenceRequest, SUCCESS_STATUS
 from nnunet_serve.nnunet_serve import nnUNetAPI
 
 
@@ -49,8 +49,15 @@ def main(args):
         if k in all_set_args
     ]
 
-    response = nnunet_api.infer(inference_request)
-    response = json.loads(response.body.decode("utf-8"))
+    response_obj = nnunet_api.infer(inference_request)
+    status_code = getattr(response_obj, "status_code", 200)
+    response = json.loads(response_obj.body.decode("utf-8"))
+
+    if status_code >= 400 or response.get("status") != SUCCESS_STATUS:
+        err = (
+            response.get("error") or f"Inference failed with HTTP {status_code}"
+        )
+        raise RuntimeError(err)
     for k in [
         "nifti_prediction",
         "dicom_segmentation",
