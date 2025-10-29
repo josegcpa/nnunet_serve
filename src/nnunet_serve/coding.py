@@ -4,7 +4,7 @@ Maps type or modifier concepts to SNOMED CT category codes.
 
 from nnunet_serve.str_processing import to_camel_case
 from pydicom.sr._concepts_dict import concepts as CONCEPTS
-from pydicom.sr.codedict import Code
+from highdicom.sr.coding import CodedConcept
 
 CATEGORY_MAPPING = {}
 
@@ -1449,10 +1449,18 @@ NATURAL_LANGUAGE_TO_CODE["EUCAIM"].update(
 
 LATERALITY_CODING = {}
 LATERALITY_CODING["SCT"] = {
-    "left": Code(value=7771000, meaning="Left", scheme_designator="SCT"),
-    "right": Code(value=24028007, meaning="Right", scheme_designator="SCT"),
+    "Left": CodedConcept(
+        value="7771000", meaning="Left", scheme_designator="SCT"
+    ),
+    "Right": CodedConcept(
+        value="24028007", meaning="Right", scheme_designator="SCT"
+    ),
 }
 LATERALITY_CODING["EUCAIM"] = {
-    "left": Code(value="IMG1016670", meaning="Left", scheme_designator="SCT"),
-    "right": Code(value="IMG1016682", meaning="Right", scheme_designator="SCT"),
+    "Left": CodedConcept(
+        value="IMG1016670", meaning="Left", scheme_designator="SCT"
+    ),
+    "Right": CodedConcept(
+        value="IMG1016682", meaning="Right", scheme_designator="SCT"
+    ),
 }
