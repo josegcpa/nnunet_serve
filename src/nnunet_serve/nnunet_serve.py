@@ -186,7 +186,21 @@ class nnUNetAPI:
                 status_code=400,
             )
 
-        device_id = wait_for_gpu(min_mem)
+        try:
+            device_id = wait_for_gpu(min_mem)
+        except (RuntimeError, TimeoutError) as e:
+            return JSONResponse(
+                content={
+                    "time_elapsed": None,
+                    "gpu": None,
+                    "nnunet_path": None,
+                    "metadata": None,
+                    "status": FAILURE_STATUS,
+                    "request": inference_request.__dict__,
+                    "error": str(e),
+                },
+                status_code=503,
+            )
 
         if "tta" in params:
             mirroring = params["tta"]
@@ -219,14 +233,16 @@ class nnUNetAPI:
                 )
                 error = None
                 status = SUCCESS_STATUS
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 b = time.time()
 
             except Exception as e:
                 output_paths = {}
                 status = FAILURE_STATUS
                 error = str(e)
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         b = time.time()
 
         payload = {
@@ -280,9 +296,14 @@ def get_model_dictionary() -> tuple[dict, dict]:
             task_clean = task.replace("_fastest", "").replace("_fast", "")
             task_id = TASK_CONVERSION[task]
             download_pretrained_weights(task_id)
-            model["rel_path"] = glob(
-                os.path.join(totalseg_dir, f"*{task_id}*")
-            )[0].replace(models_specs["model_folder"], "")
+            matches = glob(os.path.join(totalseg_dir, f"*{task_id}*"))
+            if not matches:
+                raise FileNotFoundError(
+                    f"Could not find TotalSegmentator weights for task_id '{task_id}' under '{totalseg_dir}'."
+                )
+            model["rel_path"] = matches[0].replace(
+                models_specs["model_folder"], ""
+            )
             model["name"] = f"totalseg_{task}"
             segment_names = {v: k for k, v in class_map[task_clean].items()}
             segment_names = sorted(
@@ -302,8 +323,10 @@ def get_model_dictionary() -> tuple[dict, dict]:
             model["metadata"] = {
                 "segment_names": snomed_concepts,
                 "algorithm_name": "TotalSegmentator",
-                "algorithm_version": importlib.metadata.version(
-                    "TotalSegmentator"
+                "algorithm_version": (
+                    importlib.metadata.version("TotalSegmentator")
+                    if hasattr(importlib, "metadata")
+                    else "unknown"
                 ),
                 "manufacturer": "TotalSegmentator",
                 "manufacturer_model_name": "TotalSegmentator",
@@ -318,7 +341,9 @@ def get_model_dictionary() -> tuple[dict, dict]:
             for alias in model["aliases"]:
                 alias_dict[alias] = k
             del model["aliases"]
-    grep_str = "|".join([model["rel_path"] for model in models_specs["models"]])
+    grep_str = "|".join(
+        [re.escape(model["rel_path"]) for model in models_specs["models"]]
+    )
     pat = re.compile(grep_str)
 
     model_folder = models_specs["model_folder"]

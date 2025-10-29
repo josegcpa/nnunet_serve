@@ -4,6 +4,7 @@ Utilities for nnU-Net model serving.
 
 import json
 import os
+import time
 import subprocess as sp
 from enum import Enum
 from typing import Any, Union
@@ -400,13 +401,20 @@ def get_gpu_memory() -> list[int]:
             index).
     """
     command = "nvidia-smi --query-gpu=memory.free --format=csv"
-    memory_free_info = (
-        sp.check_output(command.split()).decode("ascii").split("\n")[:-1][1:]
-    )
-    memory_free_values = [
-        int(x.split()[0]) for i, x in enumerate(memory_free_info)
-    ]
-    return memory_free_values
+    try:
+        memory_free_info = (
+            sp.check_output(command.split())
+            .decode("ascii")
+            .split("\n")[:-1][1:]
+        )
+        memory_free_values = [
+            int(x.split()[0]) for i, x in enumerate(memory_free_info)
+        ]
+        return memory_free_values
+    except (sp.CalledProcessError, FileNotFoundError) as e:
+        raise RuntimeError(
+            "nvidia-smi is not available or failed to run"
+        ) from e
 
 
 def get_series_paths(
@@ -462,7 +470,7 @@ def get_series_paths(
     return series_paths, SUCCESS_STATUS, None
 
 
-def wait_for_gpu(min_mem: int) -> int:
+def wait_for_gpu(min_mem: int, timeout_s: int = 120) -> int:
     """
     Waits for a GPU with at least ``min_mem`` free memory to be free.
 
@@ -472,16 +480,22 @@ def wait_for_gpu(min_mem: int) -> int:
     Returns:
         int: GPU ID corresponding to freest GPU.
     """
-    free = False
-    while free is False:
+    start = time.time()
+    while True:
         gpu_memory = get_gpu_memory()
+        if len(gpu_memory) == 0:
+            raise RuntimeError("No GPUs detected")
         max_gpu_memory = max(gpu_memory)
         device_id = [
             i for i in range(len(gpu_memory)) if gpu_memory[i] == max_gpu_memory
         ][0]
         if max_gpu_memory > min_mem:
-            free = True
-    return device_id
+            return device_id
+        if time.time() - start > timeout_s:
+            raise TimeoutError(
+                f"Timeout waiting for a GPU with at least {min_mem} MiB free. Max available: {max_gpu_memory} MiB"
+            )
+        time.sleep(0.5)
 
 
 def get_default_params(default_args: dict | list[dict]) -> dict:
@@ -548,6 +562,10 @@ def predict(
     Returns:
         list[str]: list of output paths.
     """
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA is not available but GPU inference was requested"
+        )
     predictor = nnUNetPredictor(
         tile_step_size=0.5,
         use_gaussian=True,
@@ -633,7 +651,8 @@ def predict(
     )
 
     del predictor
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return output_paths
 
 
