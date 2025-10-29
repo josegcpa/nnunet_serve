@@ -700,7 +700,8 @@ def extract_lesion_candidates(
 
 
 def make_parser(
-    description: str = "Entrypoint for nnUNet prediction. Handles all data format conversions.",
+    description: str = "Entrypoint for nnUNet prediction. Handles all data "
+    "format conversions and cascades of predictions.",
 ) -> argparse.ArgumentParser:
     """
     Convenience function to generate ``argparse`` CLI parser. Helps with
@@ -739,6 +740,7 @@ def make_parser(
         "--checkpoint_name",
         help="Checkpoint name for nnUNet",
         default="checkpoint_final.pth",
+        nargs="+",
     )
     parser.add_argument(
         "--output_dir",
@@ -821,6 +823,13 @@ def make_parser(
         type=str,
     )
     parser.add_argument(
+        "--min_intersection",
+        help="Minimum intersection over the union to keep a candidate.",
+        type=float_or_none,
+        default=0.1,
+        nargs="+",
+    )
+    parser.add_argument(
         "--crop_from",
         help="Crops the input to the bounding box of the SITK mask image in this path.",
         default=None,
@@ -831,13 +840,6 @@ def make_parser(
         help="Padding to be added to the cropped region.",
         default=(10, 10, 10),
         type=int,
-        nargs="+",
-    )
-    parser.add_argument(
-        "--min_intersection",
-        help="Minimum intersection over the union to keep a candidate.",
-        type=float_or_none,
-        default=0.1,
         nargs="+",
     )
     parser.add_argument(
