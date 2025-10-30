@@ -176,7 +176,7 @@ Ensure your `model-serve-spec.yaml` is present and correctly references your mod
   - Each entry is keyed by `id` and includes, when found, `path`, `rel_path`, `name`, `metadata`, `min_mem`, `default_args`, `n_classes`, `model_information` (parsed from `dataset.json`), and flags like `is_totalseg`.
 
 - **`GET /request-params`**
-  - Returns the JSON schema of the request body for `/infer` (Pydantic model `InferenceRequest`). Use this to dynamically build clients.
+  - Returns the JSON schema of the request body for `/infer` (Pydantic model `InferenceRequest`). Use this to dynamically build clients and as documentation.
 
 - **`POST /infer`**
   - Runs inference for one or multiple models.
