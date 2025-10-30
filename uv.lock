@@ -1407,9 +1407,11 @@ dependencies = [
     { name = "pydicom" },
     { name = "pydicom-seg" },
     { name = "pytest" },
+    { name = "python-multipart" },
     { name = "rt-utils" },
     { name = "ruff" },
     { name = "simpleitk" },
+    { name = "torch" },
     { name = "totalsegmentator" },
     { name = "uvicorn" },
 ]
@@ -1427,9 +1429,11 @@ requires-dist = [
     { name = "pydicom", specifier = ">=3" },
     { name = "pydicom-seg", git = "https://github.com/josegcpa/pydicom-seg?rev=75a1b025f2a3297e1704ae135371bfd5ce631935" },
     { name = "pytest", specifier = ">=8.4.2" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "rt-utils", specifier = ">=1.2.7" },
     { name = "ruff", specifier = ">=0.14.1" },
     { name = "simpleitk", specifier = ">=2.3.1" },
+    { name = "torch", specifier = ">=2.9.0" },
     { name = "totalsegmentator", git = "https://github.com/wasserth/TotalSegmentator" },
     { name = "uvicorn", specifier = ">=0.37.0" },
 ]
@@ -2267,6 +2271,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/76/01/53f978c32447312ddcfaee1cdd4868cfe6d6487f5c224243d8fcecb1c77a/python_gdcm-3.2.2-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:36c5d43828c7a4862776bb4a82dcf0abed8050abc477889954911854e5a18b4c", size = 12259563, upload-time = "2025-10-06T12:29:18.824Z" },
     { url = "https://files.pythonhosted.org/packages/09/a5/a895c4b0b3ce4e7a3d86f12da480df86a0bc818ec7015005baac967f3600/python_gdcm-3.2.2-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:36dabf0b2e220460462c58309598fb07690caa1de82c305d292f1616196be1d2", size = 13254969, upload-time = "2025-10-06T12:29:21.453Z" },
     { url = "https://files.pythonhosted.org/packages/9c/7e/529e3872e63166dadf8c394f901ebeb5511105f573e57239faa0fd00721d/python_gdcm-3.2.2-cp314-cp314-win_amd64.whl", hash = "sha256:11892bd7a58359be6bf556d39d8c01b5d624a5f2696c48737390178a2d26c9f6", size = 34756912, upload-time = "2025-10-06T12:29:25.201Z" },
+]
+
+[[package]]
+name = "python-multipart"
+version = "0.0.20"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/87/f44d7c9f274c7ee665a29b885ec97089ec5dc034c7f3fafa03da9e39a09e/python_multipart-0.0.20.tar.gz", hash = "sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13", size = 37158, upload-time = "2024-12-16T19:45:46.972Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/58/38b5afbc1a800eeea951b9285d3912613f2603bdf897a4ab0f4bd7f405fc/python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104", size = 24546, upload-time = "2024-12-16T19:45:44.423Z" },
 ]
 
 [[package]]
