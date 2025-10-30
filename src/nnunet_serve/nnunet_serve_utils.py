@@ -61,9 +61,13 @@ class InferenceRequestBase(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     nnunet_id: str | list[str] = Field(
-        description="nnUnet model identifier or list of nnUNet model identifiers."
+        description="nnUnet model identifier or list of nnUNet model identifiers.",
+        required=True,
     )
-    output_dir: str = Field(description="Output directory.")
+    output_dir: str = Field(
+        description="Output directory.",
+        required=True,
+    )
     class_idx: int | list[int | None] | list[
         list[int] | int | None
     ] | None = Field(
@@ -71,42 +75,37 @@ class InferenceRequestBase(BaseModel):
         default=None,
     )
     checkpoint_name: str | list[str] = Field(
-        description="nnUNet checkpoint name", default="checkpoint_final.pth"
+        description="nnUNet checkpoint name. Options are 'checkpoint_final.pth' and 'checkpoint_best.pth'.",
+        default="checkpoint_final.pth",
     )
     tmp_dir: str = Field(
-        description="Directory for temporary outputs", default=".tmp"
+        description="Directory for temporary outputs.", default=".tmp"
     )
     is_dicom: bool = Field(
-        description="Whether series_paths refers to DICOM series folders",
+        description="Whether series_paths refers to DICOM series folders.",
         default=False,
     )
     tta: bool = Field(
         description="Whether to apply test-time augmentation (use_mirroring)",
-        default=True,
+        default=False,
     )
     use_folds: Folds = Field(
         description="Which folds should be used", default_factory=lambda: [0]
     )
     proba_threshold: float | list[float | None] | None = Field(
-        description="Probability threshold for model output", default=None
+        description="(List of) probability threshold(s) for model output.",
+        default=None,
     )
     min_confidence: float | list[float | None] | None = Field(
-        description="Minimum confidence for model output", default=None
-    )
-    intersect_with: str | None = Field(
-        description="Intersects output with this mask and if relative \
-            intersection < min_intersection the object is deleted",
+        description="(List of) minimum confidence(s) for model output.",
         default=None,
     )
     min_intersection: float | None = Field(
-        description="Minimum overlap for intersection", default=0.1
-    )
-    crop_from: str | None = Field(
-        description="Crops input to the bounding box of this model. ",
-        default=None,
+        description="Minimum intersection over the union to keep a candidate.",
+        default=0.1,
     )
     crop_padding: tuple[int, int, int] | None = Field(
-        description="Padding to be added to the cropped region",
+        description="Padding to be added to the cropped region.",
         default=(10, 10, 10),
     )
     cascade_mode: CascadeMode | list[CascadeMode] = Field(
@@ -129,12 +128,15 @@ class InferenceRequestBase(BaseModel):
     )
 
     def model_post_init(self, context):
+        checkpoint_options = ["checkpoint_final.pth", "checkpoint_best.pth"]
         if self.save_proba_map and all(
             [x is None for x in self.proba_threshold]
         ):
             raise ValueError(
                 "proba_threshold must be not-None if save_proba_map is True"
             )
+        if self.checkpoint_name not in checkpoint_options:
+            raise ValueError(f"checkpoint_name must be in {checkpoint_options}")
         if isinstance(self.cascade_mode, list) is False:
             self.cascade_mode = [self.cascade_mode]
         self.cascade_mode = [mode.value for mode in self.cascade_mode]
@@ -146,6 +148,15 @@ class InferenceRequest(InferenceRequestBase):
     )
     series_folders: list[str] | list[list[str]] = Field(
         description="Series folder names or list of series folder names (relative to study_path).",
+        default=None,
+    )
+    crop_from: str | None = Field(
+        description="Crops input to the bounding box of this mask.",
+        default=None,
+    )
+    intersect_with: str | None = Field(
+        description="Intersects output with this mask and if relative \
+            intersection < min_intersection the object is deleted",
         default=None,
     )
 
