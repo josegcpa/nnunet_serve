@@ -13,6 +13,7 @@ import uuid
 import importlib
 import shutil
 import datetime
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from glob import glob
@@ -641,6 +642,11 @@ def get_model_dictionary() -> tuple[dict, dict]:
     return output_model_dictionary, alias_dict
 
 
+# Global in‑memory store for request timestamps per client IP
+_rate_limit_store: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
+
+
 def create_app() -> fastapi.FastAPI:
     """
     Creates a FastAPI application.
@@ -649,6 +655,24 @@ def create_app() -> fastapi.FastAPI:
         fastapi.FastAPI: FastAPI application.
     """
     app = fastapi.FastAPI()
+
+    @app.middleware("http")
+    async def _rate_limit_middleware(request: fastapi.Request, call_next):
+        client_ip = request.client.host if request.client else "anonymous"
+        now = time.time()
+        with _rate_limit_lock:
+            timestamps = _rate_limit_store.get(client_ip, [])
+            timestamps = [t for t in timestamps if now - t < 60]
+            if len(timestamps) >= 10:
+                raise fastapi.HTTPException(
+                    status_code=429,
+                    detail="Too many requests, limit is 10 per minute",
+                )
+            timestamps.append(now)
+            _rate_limit_store[client_ip] = timestamps
+        response = await call_next(request)
+        return response
+
     nnunet_api = nnUNetAPI(app)
     nnunet_api.init_api()
 
