@@ -1,3 +1,4 @@
+import os
 import uuid
 import shutil
 import zipfile
@@ -7,6 +8,21 @@ from fastapi import HTTPException
 from fastapi import UploadFile
 
 ALLOWED_EXTENSIONS = {".zip", ".tar", ".gz", ".tgz"}
+
+NNUNET_OUTPUT_DIR = Path(os.environ.get("NNUNET_OUTPUT_DIR", "/tmp/nnunet"))
+
+
+def get_study_path(job_id: str) -> Path:
+    """
+    Returns the path to the study directory.
+
+    Args:
+        job_id (str): The job ID.
+
+    Returns:
+        Path: The path to the study directory.
+    """
+    return NNUNET_OUTPUT_DIR / job_id
 
 
 def store_uploaded_file(upload: UploadFile, job_id: str | None = None) -> Path:
@@ -23,7 +39,7 @@ def store_uploaded_file(upload: UploadFile, job_id: str | None = None) -> Path:
     """
     if job_id is None:
         job_id = uuid.uuid4().hex
-    work_dir = Path("/tmp/nnunet") / job_id / "inputs"
+    work_dir = get_study_path(job_id) / "inputs"
     work_dir.mkdir(parents=True, exist_ok=True)
 
     dest_path = work_dir / upload.filename

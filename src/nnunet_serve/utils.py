@@ -402,14 +402,18 @@ def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
     reader = sitk.ImageSeriesReader()
     dicom_file_names = reader.GetGDCMSeriesFileNames(file_path)
     fs = []
-    good_file_paths = []
+    good_file_paths = {}
     for dcm_file in dicom_file_names:
         f = dcmread(dcm_file)
-        if (0x0020, 0x0037) in f:
-            orientation = f[0x0020, 0x0037].value
-        if (0x0020, 0x0032) in f:
+        acquisition_number = f[0x0020, 0x0012].value
+        if ((0x0020, 0x0037) in f) and ((0x0020, 0x0032) in f):
             fs.append(f)
-            good_file_paths.append(dcm_file)
+            if acquisition_number not in good_file_paths:
+                good_file_paths[acquisition_number] = []
+            good_file_paths[acquisition_number].append(dcm_file)
+    good_file_paths = [
+        good_file_paths[k] for k in sorted(good_file_paths.keys())
+    ][0]
     reader.SetFileNames(good_file_paths)
 
     sitk_image: sitk.Image = reader.Execute()

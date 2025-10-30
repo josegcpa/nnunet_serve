@@ -31,7 +31,11 @@ from totalsegmentator.map_to_binary import class_map
 from totalsegmentator.libs import download_pretrained_weights
 from typing import Any
 
-from nnunet_serve.file_utils import store_uploaded_file, zip_directory
+from nnunet_serve.file_utils import (
+    store_uploaded_file,
+    zip_directory,
+    get_study_path,
+)
 from nnunet_serve.totalseg_utils import (
     TASK_CONVERSION,
     load_snomed_mapping_expanded,
@@ -434,7 +438,10 @@ class nnUNetAPI:
             payload = json.loads(json_str)
         else:
             payload = await inference_request.json()
-        payload["output_dir"] = os.path.join("/tmp/nnunet/", job_id, "output")
+
+        study_path = get_study_path(job_id)
+        payload["study_path"] = str(study_path / "inputs")
+        payload["output_dir"] = str(study_path / "output")
 
         try:
             inference_req = InferenceRequest(**payload)
@@ -453,7 +460,7 @@ class nnUNetAPI:
             )
 
         try:
-            temp_path = store_uploaded_file(file, job_id=job_id)
+            store_uploaded_file(file, job_id=job_id)
         except Exception as exc:
             return fastapi.responses.JSONResponse(
                 content={
@@ -467,8 +474,6 @@ class nnUNetAPI:
                 },
                 status_code=400,
             )
-
-        inference_req.study_path = str(temp_path)
 
         response = await self.infer(inference_req)
 

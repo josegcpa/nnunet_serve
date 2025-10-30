@@ -49,24 +49,6 @@ def get_logger(log_name: str):
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
-    class SensitiveDataFilter(logging.Filter):
-        REDACT_KEYS = {"password", "secret", "token", "api_key", "access_key"}
-
-        def filter(self, record: logging.LogRecord) -> bool:
-            msg = record.getMessage()
-            for key in self.REDACT_KEYS:
-                # captures generic patterns (i.e. key=value, key:value)
-                msg = re.sub(
-                    rf"({key}\s*[:=]\s*)([^\s,]+)",
-                    rf"\1****",
-                    msg,
-                    flags=re.IGNORECASE,
-                )
-            record.msg = msg
-            return True
-
-    logger.addFilter(SensitiveDataFilter())
-
     if os.getenv("NNUNET_SERVE_LOG_TO_FILE", "0") == "1":
         from logging.handlers import RotatingFileHandler
 
