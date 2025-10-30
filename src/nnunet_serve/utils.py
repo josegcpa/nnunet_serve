@@ -16,13 +16,6 @@ logger = get_logger(__name__)
 
 from typing import Sequence
 
-Folds = (
-    tuple[int]
-    | tuple[int, int]
-    | tuple[int, int, int]
-    | tuple[int, int, int, int]
-    | tuple[int, int, int, int, int]
-)
 
 RESCALE_INTERCEPT_TAG = (0x0028, 0x1052)
 RESCALE_SLOPE_TAG = (0x0028, 0x1053)
