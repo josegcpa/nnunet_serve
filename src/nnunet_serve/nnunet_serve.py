@@ -125,9 +125,13 @@ class nnUNetAPI:
         row = cur.fetchone()
         return Path(row[0]) if row else None
 
-    def cleanup_old_records(self, days: int) -> int:
-        """Delete records older than *days*.
+    def cleanup_old_records(self, days: int = 7) -> int:
+        """
+        Delete records older than *days*.
         Returns the number of rows removed.
+
+        Args:
+            days (int, optional): Number of days to keep records. Defaults to 7.
         """
         cutoff = datetime.date.today() - datetime.timedelta(days=days)
         cur = self._db_conn.cursor()
@@ -234,7 +238,7 @@ class nnUNetAPI:
             "max_free_mem": max_free_mem,
         }
 
-    def infer(self, inference_request: InferenceRequest):
+    async def infer(self, inference_request: InferenceRequest):
         """
         Performs inference.
 
@@ -464,7 +468,7 @@ class nnUNetAPI:
 
         inference_req.study_path = str(temp_path)
 
-        response = self.infer(inference_req)
+        response = await self.infer(inference_req)
 
         if response.status_code == 200:
             zip_path = zip_directory(Path(inference_req.output_dir))
