@@ -29,7 +29,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter
 from nnunet_serve.utils import (
-    Folds,
     copy_information_nd,
     extract_lesion_candidates,
     intersect,
@@ -51,6 +50,20 @@ class CascadeMode(Enum):
     CROP = "crop"
 
 
+class CheckpointName(Enum):
+    FINAL = "checkpoint_final.pth"
+    BEST = "checkpoint_best.pth"
+
+
+class Folds(Enum):
+    ALL = "all"
+    ZERO = 0
+    ONE = 1
+    TWO = 2
+    THREE = 3
+    FOUR = 4
+
+
 class InferenceRequestBase(BaseModel):
     """
     Data model for the inference request from local data. Supports providing
@@ -58,7 +71,7 @@ class InferenceRequestBase(BaseModel):
     intersection-based filtering of downstream results.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     nnunet_id: str | list[str] = Field(
         description="nnUnet model identifier or list of nnUNet model identifiers.",
@@ -74,9 +87,9 @@ class InferenceRequestBase(BaseModel):
         description="Prediction index or indices which are kept after each prediction",
         default=None,
     )
-    checkpoint_name: str | list[str] = Field(
+    checkpoint_name: CheckpointName | list[CheckpointName] = Field(
         description="nnUNet checkpoint name. Options are 'checkpoint_final.pth' and 'checkpoint_best.pth'.",
-        default="checkpoint_final.pth",
+        default=CheckpointName.FINAL,
     )
     tmp_dir: str = Field(
         description="Directory for temporary outputs.", default=".tmp"
@@ -89,7 +102,7 @@ class InferenceRequestBase(BaseModel):
         description="Whether to apply test-time augmentation (use_mirroring)",
         default=False,
     )
-    use_folds: Folds = Field(
+    use_folds: list[Folds] = Field(
         description="Which folds should be used", default_factory=lambda: [0]
     )
     proba_threshold: float | list[float | None] | None = Field(
@@ -127,19 +140,31 @@ class InferenceRequestBase(BaseModel):
         description="Suffix for predictions", default=None
     )
 
+    def __internal_update_field(self, field: str, value: Any):
+        is_set = False
+        if field in self.__pydantic_fields_set__:
+            is_set = True
+        self.__setattr__(field, value)
+        if is_set is True:
+            self.__pydantic_fields_set__.remove(field)
+
     def model_post_init(self, context):
-        checkpoint_options = ["checkpoint_final.pth", "checkpoint_best.pth"]
         if self.save_proba_map and all(
             [x is None for x in self.proba_threshold]
         ):
             raise ValueError(
                 "proba_threshold must be not-None if save_proba_map is True"
             )
-        if self.checkpoint_name not in checkpoint_options:
-            raise ValueError(f"checkpoint_name must be in {checkpoint_options}")
+        if isinstance(self.checkpoint_name, list) is False:
+            self.checkpoint_name = [self.checkpoint_name]
+        self.__internal_update_field(
+            "checkpoint_name", [mode.value for mode in self.checkpoint_name]
+        )
         if isinstance(self.cascade_mode, list) is False:
             self.cascade_mode = [self.cascade_mode]
-        self.cascade_mode = [mode.value for mode in self.cascade_mode]
+        self.__internal_update_field(
+            "cascade_mode", [mode.value for mode in self.cascade_mode]
+        )
 
 
 class InferenceRequest(InferenceRequestBase):
