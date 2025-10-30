@@ -1,9 +1,12 @@
 import uuid
 import shutil
+import zipfile
+import tarfile
 from pathlib import Path
-import zipfile, uuid, shutil
 from fastapi import HTTPException
 from fastapi import UploadFile
+
+ALLOWED_EXTENSIONS = {".zip", ".tar", ".gz", ".tgz"}
 
 
 def store_uploaded_file(upload: UploadFile, job_id: str | None = None) -> Path:
@@ -25,25 +28,28 @@ def store_uploaded_file(upload: UploadFile, job_id: str | None = None) -> Path:
 
     dest_path = work_dir / upload.filename
 
+    if dest_path.suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {dest_path.suffix}",
+        )
+
     with dest_path.open("wb") as out_file:
         shutil.copyfileobj(upload.file, out_file)
 
-    if dest_path.suffix in {".zip", ".tar", ".gz", ".tgz"}:
-        import zipfile, tarfile
-
-        try:
-            if dest_path.suffix == ".zip":
-                with zipfile.ZipFile(dest_path) as zf:
-                    zf.extractall(work_dir)
-            else:
-                with tarfile.open(dest_path) as tf:
-                    tf.extractall(work_dir)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to unpack archive: {exc}",
-            )
-        dest_path.unlink()
+    try:
+        if dest_path.suffix == ".zip":
+            with zipfile.ZipFile(dest_path) as zf:
+                zf.extractall(work_dir)
+        else:
+            with tarfile.open(dest_path) as tf:
+                tf.extractall(work_dir)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to unpack archive: {exc}",
+        )
+    dest_path.unlink()
     return work_dir
 
 
