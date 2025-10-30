@@ -4,6 +4,7 @@ Minimal utilities for logging.
 
 import logging
 import os
+import re
 from pathlib import Path
 
 LOGS_DIR = os.environ.get("LOGS_DIR", "./logs")
@@ -16,7 +17,11 @@ formatter = logging.Formatter(
 
 def get_logger(log_name: str):
     """
-    Returns a logger that logs to console.
+    Returns a logger that logs to console. Features the following:
+        - Console stream handler (already present)
+        - Optional rotating file handler (env LOG_TO_FILE=1)
+        - Redaction filter for common secret keys
+        - Propagation disabled to avoid duplicate logs
 
     Args:
         log_name (str): The name of the logger.
@@ -25,6 +30,7 @@ def get_logger(log_name: str):
         logging.Logger: The logger.
     """
     logger = logging.getLogger(log_name)
+    logger.propagate = False
     level_env = os.environ.get("NNUNET_SERVE_LOGGING_LEVEL", "INFO")
     if isinstance(level_env, str):
         level = getattr(logging, level_env.upper(), logging.INFO)
@@ -39,6 +45,50 @@ def get_logger(log_name: str):
         isinstance(h, logging.StreamHandler) for h in logger.handlers
     )
     if not has_stream:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+    class SensitiveDataFilter(logging.Filter):
+        REDACT_KEYS = {"password", "secret", "token", "api_key", "access_key"}
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            for key in self.REDACT_KEYS:
+                # captures generic patterns (i.e. key=value, key:value)
+                msg = re.sub(
+                    rf"({key}\s*[:=]\s*)([^\s,]+)",
+                    rf"\1****",
+                    msg,
+                    flags=re.IGNORECASE,
+                )
+            record.msg = msg
+            return True
+
+    logger.addFilter(SensitiveDataFilter())
+
+    if os.getenv("NNUNET_SERVE_LOG_TO_FILE", "0") == "1":
+        from logging.handlers import RotatingFileHandler
+
+        add_file_handler(logger, log_name)
+        for h in list(logger.handlers):
+            if isinstance(h, logging.FileHandler) and not isinstance(
+                h, RotatingFileHandler
+            ):
+                logger.removeHandler(h)
+        rotating = RotatingFileHandler(
+            f"{LOGS_DIR}/{log_name}.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        rotating.setFormatter(formatter)
+        logger.addHandler(rotating)
+        try:
+            os.chmod(rotating.baseFilename, 0o600)
+        except Exception:
+            pass
+
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
