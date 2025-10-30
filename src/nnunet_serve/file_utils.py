@@ -60,5 +60,5 @@ def zip_directory(src_dir: Path) -> Path:
         for file_path in src_dir.rglob("*"):
             if file_path.is_file():
                 # store relative path inside the zip
-                zf.write(file_path, file_path.relative_to(src_dir))
+                zf.write(file_path, file_path.relative_to(src_dir.parent))
     return zip_path

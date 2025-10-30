@@ -80,6 +80,8 @@ class nnUNetAPI:
     app: fastapi.FastAPI | None = None
 
     def __post_init__(self):
+        if torch.cuda.is_available() == False:
+            raise ValueError("No GPU available")
         self.model_dictionary, self.alias_dict = get_model_dictionary()
         # Initialise SQLite DB for zip storage
         self._db_path = Path("/tmp/nnunet/zip_store.db")
@@ -419,16 +421,14 @@ class nnUNetAPI:
         and delegates to the existing ``infer`` method.
         """
 
-        random_uuid = uuid.uuid4().hex
+        job_id = uuid.uuid4().hex
         form = await inference_request.form()
         json_str = form.get("request")
         if json_str is not None:
             payload = json.loads(json_str)
         else:
             payload = await inference_request.json()
-        payload["output_dir"] = os.path.join(
-            "/tmp/nnunet/", random_uuid, "output"
-        )
+        payload["output_dir"] = os.path.join("/tmp/nnunet/", job_id, "output")
 
         try:
             inference_req = InferenceRequest(**payload)
@@ -447,7 +447,7 @@ class nnUNetAPI:
             )
 
         try:
-            temp_path = store_uploaded_file(file, job_id=random_uuid)
+            temp_path = store_uploaded_file(file, job_id=job_id)
         except Exception as exc:
             return fastapi.responses.JSONResponse(
                 content={
@@ -466,7 +466,6 @@ class nnUNetAPI:
 
         response = self.infer(inference_req)
 
-        job_id = uuid.uuid4().hex
         if response.status_code == 200:
             zip_path = zip_directory(Path(inference_req.output_dir))
             self._store_zip(job_id, zip_path)
@@ -496,7 +495,8 @@ class nnUNetAPI:
         )
 
     def __del__(self):
-        self._db_conn.close()
+        if hasattr(self, "_db_conn"):
+            self._db_conn.close()
 
 
 def get_totalseg_dir(model_specs: dict):
@@ -507,7 +507,9 @@ def get_totalseg_dir(model_specs: dict):
     os.environ[weights_key] = os.path.join(
         model_specs["model_folder"], "totalseg"
     )
-    return os.environ[weights_key]
+    out = os.environ[weights_key]
+    Path(out).mkdir(parents=True, exist_ok=True)
+    return out
 
 
 def get_model_dictionary() -> tuple[dict, dict]:
