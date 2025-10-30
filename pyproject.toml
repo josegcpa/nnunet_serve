@@ -22,6 +22,8 @@ dependencies = [
     "totalsegmentator>=2.5",
     "dicom2nifti>=2.6.0",
     "owlready2>=0.48",
+    "torch>=2.9.0",
+    "python-multipart>=0.0.20",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -30,7 +32,6 @@ license = {text = "MIT"}
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-packages = ["src/foo"]
 
 [tool.uv.sources]
 pydicom-seg = { git = "https://github.com/josegcpa/pydicom-seg", rev = "75a1b025f2a3297e1704ae135371bfd5ce631935" }
