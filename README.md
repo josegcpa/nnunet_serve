@@ -6,147 +6,123 @@ Given that [nnUNet](https://github.com/MIC-DKFZ/nnUNet) is a relatively flexible
 
 ## Usage
 
+### Configure models: `model-serve-spec.yaml`
+
+Model configuration makes use of `model-serve-spec.yaml`. This is a relatively simple YAML file where each model is defined, together with potential aliases and the relevant paths.
+
+- **`model_folder`**: absolute path where models exist or will be downloaded (for TotalSegmentator tasks).
+- **`models[]`**: list of model entries. Each entry can define:
+  - **`id`**: identifier used in API requests (see `nnunet_id`).
+  - **`rel_path`**: substring pattern to locate the model directory under `model_folder` (folder containing `fold_0`, etc.).
+  - **`name`** and optional **`aliases`**: user-friendly names/aliases; all map to `id`.
+  - **`metadata`**: DICOM metadata for DICOM-SEG/RTStruct export. Either:
+    - `{ path: <path/to/metadata.json> }` to a DCMQI template file, or
+    - an inline object with keys such as `algorithm_name`, `segment_names`, etc. (see examples in `model-serve-spec.yaml`). When both are provided, `metadata.path` takes precedence.
+  - **`min_mem`**: minimum free GPU memory in MiB to start (`wait_for_gpu`).
+  - **`default_args`**: defaults for request parameters (e.g., `series_folders`, `use_folds`, `proba_threshold`, `min_confidence`, `tta`, `save_proba_map`, `checkpoint_name`, etc.). When multiple models are requested, list-valued defaults are merged per model (see `get_default_params()` in `nnunet_serve_utils.py`).
+  - For TotalSegmentator tasks, you can specify `totalseg_task` (e.g., `total_fastest`); weights are auto-downloaded and `metadata` is auto-derived.
+
+
 ### Standalone script
 
 A considerable objective of this framework was its deployment as a standalone tool (for `bash`). To use it:
 
 1. Install the necessary packages using an appropriate Python environment (i.e. `pip install -r requirements.txt`). We have tested this using Python `v3.11`
-2. Run `python utils/entrypoint-prod.py --help` to see the available options
+2. Run `uv run nnunet_serve.entrypoints.entrypoint.py --help` to see the available options
 3. Segment away!
 
 ```bash
-python utils/entrypoint-prod.py --help
+uv run nnunet_serve.entrypoints.entrypoint.py --help
 ```
 
 ```
-usage: Entrypoint for nnUNet prediction. Handles all data format conversions. [-h] --series_paths SERIES_PATHS
-                                                                              [SERIES_PATHS ...] --model_path MODEL_PATH
-                                                                              [--checkpoint_name CHECKPOINT_NAME]
-                                                                              --output_dir OUTPUT_DIR --metadata_path
-                                                                              METADATA_PATH
-                                                                              [--fractional_metadata_path FRACTIONAL_METADATA_PATH]
-                                                                              [--empty_segment_metadata EMPTY_SEGMENT_METADATA]
-                                                                              [--fractional_as_segments]
-                                                                              [--study_uid STUDY_UID]
-                                                                              [--folds FOLDS [FOLDS ...]] [--tta]
-                                                                              [--tmp_dir TMP_DIR] [--is_dicom]
-                                                                              [--proba_map]
-                                                                              [--proba_threshold PROBA_THRESHOLD]
-                                                                              [--min_confidence MIN_CONFIDENCE]
-                                                                              [--rt_struct_output] [--save_nifti_inputs]
-                                                                              [--intersect_with INTERSECT_WITH]
-                                                                              [--min_intersection MIN_INTERSECTION]
-                                                                              [--class_idx CLASS_IDX] [--suffix SUFFIX]
-                                                                              [--job_id JOB_ID]
-                                                                              [--update_url UPDATE_URL]
-                                                                              [--success_message SUCCESS_MESSAGE]
-                                                                              [--failure_message FAILURE_MESSAGE]
-                                                                              [--log_file LOG_FILE] [--debug]
-
 options:
-    -h, --help            show this help message and exit
-    --series_paths SERIES_PATHS [SERIES_PATHS ...], -i SERIES_PATHS [SERIES_PATHS ...]
-                            Path to input series
-    --model_path MODEL_PATH, -m MODEL_PATH
-                            Path to nnUNet model folder
-    --checkpoint_name CHECKPOINT_NAME, -ckpt CHECKPOINT_NAME
-                            Checkpoint name for nnUNet
-    --output_dir OUTPUT_DIR, -o OUTPUT_DIR
-                            Path to output directory
-    --metadata_path METADATA_PATH, -M METADATA_PATH
-                            Path to metadata template for DICOM-Seg output
-    --fractional_metadata_path FRACTIONAL_METADATA_PATH
-                            Path to metadata template for fractional DICOM-Seg output (defaults to --metadata_path)
-    --empty_segment_metadata EMPTY_SEGMENT_METADATA
-                            Path to metadata template for when predictions are empty
-    --fractional_as_segments
-                            Converts the fractional output to a categorical DICOM-Seg with discretized probabilities (the
-                            number of discretized probabilities is specified as the number of segmentAttributes in
-                            metadata_path or fractional_metadata_path)
-    --study_uid STUDY_UID, -s STUDY_UID
-                            Study UID if series are SimpleITK-readable files
-    --folds FOLDS [FOLDS ...], -f FOLDS [FOLDS ...]
-                            Sets which folds should be used with nnUNet
-    --tta, -t             Uses test-time augmentation during prediction
-    --tmp_dir TMP_DIR     Temporary directory
-    --is_dicom, -D        Assumes input is DICOM (and also converts to DICOM seg; prediction.dcm in output_dir)
-    --proba_map, -p       Produces a Nifti format probability map (probabilities.nii.gz in output_dir)
-    --proba_threshold PROBA_THRESHOLD
-                            Sets probabilities in proba_map lower than proba_threhosld to 0
-    --min_confidence MIN_CONFIDENCE
-                            Removes objects whose max prob is smaller than min_confidence
-    --rt_struct_output    Produces a DICOM RT Struct file (struct.dcm in output_dir)
-    --save_nifti_inputs, -S
-                            Moves Nifti inputs to output folder (volume_XXXX.nii.gz in output_dir)
-    --intersect_with INTERSECT_WITH
-                            Calculates the IoU with the sitk mask image in this path and uses this value to filter images
-                            such that IoU < --min_intersection are ruled out.
-    --min_intersection MIN_INTERSECTION
-                            Minimum intersection over the union to keep a candidate.
-    --class_idx CLASS_IDX
-                            Class index.
-    --suffix SUFFIX       Adds a suffix (_suffix) to the outputs if specified.
-    --job_id JOB_ID       Job ID that will be used to post job status/create log file
-    --update_url UPDATE_URL
-                            URL to be used to post job status
-    --success_message SUCCESS_MESSAGE
-                            Message to be posted in case of success
-    --failure_message FAILURE_MESSAGE
-                            Message to be posted in case of failure
-    --log_file LOG_FILE   Path to log file (with job_id, and success/failure messages)
-    --debug               Enters debug mode
+  -h, --help            show this help message and exit
+  --study_path, -i STUDY_PATH
+                        Path to input series
+  --series_folders, -s SERIES_FOLDERS [SERIES_FOLDERS ...]
+                        Path to input series folders
+  --nnunet_id NNUNET_ID [NNUNET_ID ...]
+                        nnUNet ID
+  --checkpoint_name CHECKPOINT_NAME
+                        Checkpoint name for nnUNet
+  --output_dir, -o OUTPUT_DIR
+                        Path to output directory
+  --folds, -f FOLDS [FOLDS ...]
+                        Sets which folds should be used with nnUNet
+  --tta, -t             Uses test-time augmentation during prediction
+  --tmp_dir TMP_DIR     Temporary directory
+  --is_dicom, -D        Assumes input is DICOM (and also converts to DICOM seg; prediction.dcm in output_dir)
+  --proba_map, -p       Produces a Nifti format probability map (probabilities.nii.gz in output_dir)
+  --proba_threshold PROBA_THRESHOLD [PROBA_THRESHOLD ...]
+                        Sets probabilities in proba_map lower than proba_threhosld to 0
+  --min_confidence MIN_CONFIDENCE [MIN_CONFIDENCE ...]
+                        Removes objects whose max prob is smaller than min_confidence
+  --rt_struct_output    Produces a DICOM RT Struct file (struct.dcm in output_dir; requires DICOM input)
+  --save_nifti_inputs, -S
+                        Moves Nifti inputs to output folder (volume_XXXX.nii.gz in output_dir)
+  --cascade_mode {intersect,crop} [{intersect,crop} ...]
+                        Defines the cascade mode. Must be either intersect or crop.
+  --intersect_with INTERSECT_WITH
+                        Calculates the IoU with the SITK mask image in this path and uses this value to filter images such that IoU <
+                        --min_intersection are ruled out.
+  --min_intersection MIN_INTERSECTION [MIN_INTERSECTION ...]
+                        Minimum intersection over the union to keep a candidate.
+  --crop_from CROP_FROM
+                        Crops the input to the bounding box of the SITK mask image in this path.
+  --crop_padding CROP_PADDING [CROP_PADDING ...]
+                        Padding to be added to the cropped region.
+  --class_idx CLASS_IDX [CLASS_IDX ...]
+                        Class index.
+  --suffix SUFFIX       Adds a suffix (_suffix) to the outputs if specified.
 ```
 
 Example:
 
+The example below outlines the path to a given study (`--study_path`) and to a given series folder (`--series_folders`). The `--nnunet_id` flag outlines the models to be used, in this case, `prostate` and `prostate_zones` (the two models are applied sequentially, and the output from the first model is used to crop the input to the second model as noted in `--cascade_mode`). The `--output_dir` flag outlines the path to the output directory. The `--is_dicom` flag outlines that the input is a DICOM file. The `--proba_threshold` flag outlines the probability threshold for the probability map. The `--cascade_mode` flag outlines the cascade mode (`crop` or `intersect`). The `--save_nifti_inputs` flag outlines that the Nifti inputs should be saved to the output directory. The `--crop_padding` flag outlines the padding to be added to the cropped region.
+
 ```bash
-python utils/entrypoint-prod.py \
-    -i study/series_1 study/series_2 study/series_3 \
-    -o example_output/ \
-    -m models/prostate_model \
-    -M metadata_templates/metadata-template.json \
-    -D -f 0 1 2 3 4 \
-    --proba_map \
-    --save_nifti_inputs
+uv run nnunet_serve.entrypoints.entrypoint \
+  --study_path path/to/study \
+  --series_folders relative/path/to/series \
+  --nnunet_id prostate prostate_zones \
+  --output_dir path/to/output \
+  --is_dicom \
+  --proba_threshold None \
+  --cascade_mode crop \
+  --save_nifti_inputs \
+  --crop_padding 20 20 20
 ```
 
-### Running as a Docker container
+#### Extended argument description
 
-Firstly, users must install [Docker](https://www.docker.com/). **Docker requires `sudo` if not [correctly setup](https://docs.docker.com/engine/install/linux-postinstall/) so be mindful of this!**. Then:
+A core concept underlies this framework - that of cascading predictions. The output of a prediction is used as an input for the next prediction by either cropping the input image, filtering objects in the output image based on a minimum intersection or by appending it to the input image. Fields flagged with 💧 support multiple values in compliance with the cascade. For these fields, multiple space-separated values can be specified as long as the number of values matches the number of models (`nnunet_id`) in the cascade. In some instances, multiple values at each stage might require specification (`series_folders` or `folds`). For these, at each stage, multiple values can be specified using commas (`,`).
 
-1. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
-2. Run the container. We have replicated this as an additional script (`utils/entrypoint-with-docker.py`) with the same arguments as those specified to run as a standalone tool with the addition of a `-c` flag specifying the name of the Docker image.
+- **`--study_path` / `-i`**: Path to the input study directory containing the imaging data. Required.
+- **`--series_folders` / `-s`**: One or more relative paths to series folders within the study. Required. Multiple **space separated** values refer to multiple stages of the cascade. At each stage, different series can be specified using commas (`,`) 💧
+- **`--nnunet_id`**: Identifier(s) of the nnU‑Net model(s) to run. Provide one or more model names; they will be applied sequentially 💧
+- **`--checkpoint_name`**: Name(s) of the checkpoint file(s) to load (default: `checkpoint_final.pth`) 💧
+- **`--output_dir` / `-o`**: Directory where all output files (segmentations, maps, logs) will be written. Required.
+- **`--folds` / `-f`**: Which cross‑validation folds to use. Accepts a list of integers (default: `0`). Multiple **space separated** values refer to multiple stages of the cascade; multiple values at each stage can be specified using commas (`,`) 💧
+- **`--tta` / `-t`**: Enable test‑time augmentation (mirroring) during inference.
+- **`--tmp_dir`**: Temporary directory for intermediate files (default: `.tmp`).
+- **`--is_dicom` / `-D`**: Indicate that the input series are DICOM. The tool will also generate a DICOM segmentation (`prediction.dcm`).
+- **`--proba_map` / `-p`**: Output a probability map in NIfTI format (`probabilities.nii.gz`).
+- **`--proba_threshold`**: Threshold applied to the probability map; values below this are set to zero (default: `0.5`). Can be a list to match multiple models. 💧
+- **`--min_confidence`**: Minimum confidence required for a predicted object; objects below this are discarded (default: none). Can be a list. 💧
+- **`--rt_struct_output`**: Produce a DICOM RT Struct file (`struct.dcm`) in the output directory (requires DICOM input).
+- **`--save_nifti_inputs` / `-S`**: Save the NIfTI versions of the input volumes in the output folder.
+- **`--cascade_mode`**: Define how multiple models are combined: `intersect` (default), `crop` or `concatenate`.
+- **`--intersect_with`**: Path to a mask image used to compute IoU; predictions with IoU below `--min_intersection` are removed.
+- **`--min_intersection`**: Minimum IoU required to keep a candidate when using `--intersect_with` (default: `0.1`).  When using `--cascade_mode intersect`, this flag is used for intersection filtering.
+- **`--crop_from`**: Path to a mask image whose bounding box will be used to crop the input before the next model. 
+- **`--crop_padding`**: Padding (in voxels) added around the cropped region (default: `10 10 10`).  When using `--cascade_mode crop` this flag is used for cropping.
+- **`--class_idx`**: Index or list of class indices to retain in the final output (default: `all`). 💧
+- **`--suffix`**: Optional suffix appended to output filenames (e.g., `_v1`).
 
-With `utils/entrypoint-with-docker.py`, this:
+### Logging and status updates for CLI (for `uv run nnunet_serve.entrypoints.entrypoint_prod`)
 
-```
-docker run \
-    --gpus all \
-    --user "$(id -u):$(id -g)" \
-    -v $(dirname $(realpath $INPUT_PATHS)):/data/input \
-    -v $(realpath $OUTPUT_FOLDER):/data/output \
-    -v $(realpath $MODEL_FOLDER):/model \
-    -v $(dirname $(realpath $METADATA_TEMPLATE)):/metadata \
-    --rm \
-    $DOCKER_IMAGE \
-    -i $file_names_in_docker -d -M $metadata_name_in_docker
-```
-
-becomes this (for a DICOM input):
-
-```
-python utils/entrypoint-with-docker.py \
-    -i $INPUT_PATHS \
-    -o $OUTPUT_FOLDER \
-    -m $MODEL_FOLDER \
-    -d \
-    -M $METADATA_TEMPLATE \
-    -c $DOCKER_IMAGE
-```
-
-### Logging and status updates
-
-To facilitate integration into production environments, we have added a logging function to `entrypoint-prod.py`. This works by specifying the following CLI arguments:
+To facilitate integration into production environments, we have added a logging function to `entrypoint_prod.py`. This works by specifying the following CLI arguments:
 
 - `--update_url` - this is the URL to be used to post job status. Will post `--job_id` (under `job_id`), `--success_message` or `--failure_message` depending on the outcome of the job (under `status`). Errors are logged using `output_error` and any additional information is logged under `output_log`. In other words, the following JSON is posted to `--update_url`:
 
@@ -193,20 +169,6 @@ python -m uvicorn nnunet_serve.nnunet_serve:create_app \
 
 Ensure your `model-serve-spec.yaml` is present and correctly references your models. GPU and `nvidia-smi` must be available; the server waits for a GPU with enough free memory before running a job.
 
-### Configure models: `model-serve-spec.yaml`
-
-- **`model_folder`**: absolute path where models exist or will be downloaded (for TotalSegmentator tasks).
-- **`models[]`**: list of model entries. Each entry can define:
-  - **`id`**: identifier used in API requests (see `nnunet_id`).
-  - **`rel_path`**: substring pattern to locate the model directory under `model_folder` (folder containing `fold_0`, etc.).
-  - **`name`** and optional **`aliases`**: user-friendly names/aliases; all map to `id`.
-  - **`metadata`**: DICOM metadata for DICOM-SEG/RTStruct export. Either:
-    - `{ path: <path/to/metadata.json> }` to a DCMQI template file, or
-    - an inline object with keys such as `algorithm_name`, `segment_names`, etc. (see examples in `model-serve-spec.yaml`). When both are provided, `metadata.path` takes precedence.
-  - **`min_mem`**: minimum free GPU memory in MiB to start (`wait_for_gpu`).
-  - **`default_args`**: defaults for request parameters (e.g., `series_folders`, `use_folds`, `proba_threshold`, `min_confidence`, `tta`, `save_proba_map`, `checkpoint_name`, etc.). When multiple models are requested, list-valued defaults are merged per model (see `get_default_params()` in `nnunet_serve_utils.py`).
-  - For TotalSegmentator tasks, you can specify `totalseg_task` (e.g., `total_fastest`); weights are auto-downloaded and `metadata` is auto-derived.
-
 ### Endpoints
 
 - **`GET /model_info`**
@@ -219,6 +181,18 @@ Ensure your `model-serve-spec.yaml` is present and correctly references your mod
 - **`POST /infer`**
   - Runs inference for one or multiple models.
   - Response includes execution metadata and exported file paths (see below). On errors, a JSON with `status="failed"` and `error` is returned with HTTP 400/500.
+
+- **`POST /infer_file`**
+  - Accepts a file (or archive) upload, stores it, builds an `InferenceRequest`, and delegates to `/infer`. Returns a job ID and inference result. The fields that should be sent are identical to those of the `/infer` method with the exception of the `study_path` field, which is not required.
+
+- **`GET /download/{job_id}`**
+  - Serves the zip file containing the inference outputs for the given job ID. Returns 404 if the job ID is unknown or the file has been cleaned up.
+
+- **`GET /healthz`**
+  - Simple health check endpoint returning `{"status": "ok"}`.
+
+- **`GET /readyz`**
+  - Readiness probe indicating whether models are loaded and a GPU is available (if required). Returns `{ "status": "ok" }` when ready, otherwise `{ "status": "starting" }` with additional fields.
 
 ### Request body schema (InferenceRequest)
 
@@ -321,6 +295,14 @@ curl -X POST http://localhost:12345/infer \
     "save_rt_struct_output": true
   }'
 ```
+
+### Running as a Docker container
+
+Firstly, users must install [Docker](https://www.docker.com/). **Docker requires `sudo` if not [correctly setup](https://docs.docker.com/engine/install/linux-postinstall/) so be mindful of this!**. Then:
+
+1. Adapt the `model-serve-spec.yaml` with your favourite models; this is the blueprint for `model-serve-spec-docker.yaml` (same models but different model directory)
+2. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
+3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`): `sudo docker run -it -p 50422:50422 --gpus all -v /models:/models nnunet_predict`. This will launch the inference server (described below)
 
 ### Operational notes
 
