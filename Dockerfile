@@ -3,6 +3,8 @@ USER root
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /uvx /bin/
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
+ENV UVICORN_HOST=0.0.0.0
+ENV UVICORN_PORT=50422
 
 # install internal dependencies
 COPY docker-installations.sh docker-installations.sh
@@ -26,12 +28,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-editable
 
 COPY model-serve-spec-docker.yaml /app/model-serve-spec.yaml
+COPY metadata metadata
 
 # create accessory directories
-RUN mkdir /model && \
-    mkdir -p /data && \
-    mkdir -p /data/input && \
-    mkdir -p /data/output && \
-    mkdir -p utils
+RUN mkdir -p /tmp 
+RUN mkdir -p /models
 
-ENTRYPOINT ["python", "utils/entrypoint_prod.py"]
+ENTRYPOINT ["uv", "run", "uvicorn", "nnunet_serve.nnunet_serve:create_app"]
