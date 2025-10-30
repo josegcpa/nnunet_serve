@@ -2,76 +2,26 @@
 model_folder: /usr/backups/models/nnunet/
 load_timeout_min: 60
 models:
-  - id: prostate_whole_gland
-    rel_path: prostate_whole_gland_model
-    name: "Prostate whole gland segmentation"
-    # file containing metadata for DICOM-seg output
-    aliases: [prostate]
-    metadata: metadata_templates/whole-prostate.json
-    # minimum amount of GPU memory to trigger running
-    min_mem: 4000
-    # defines default params (overriden by posts)
-    default_args:
-      series_folders: ["inputs/seriesT2"]
-      use_folds: [0, 1, 2, 3, 4]
-      proba_threshold: 0.1
-      min_confidence: 0.5
-      tta: true
-      save_proba_map: true
-      checkpoint_name: "checkpoint_best.pth"
-  - id: prostate_zone
-    rel_path: prostate_zone_model
-    name: "Prostate zone segmentation model"
-    aliases: [prostate_zones]
-    metadata: metadata_templates/prostate-zones.json
-    min_mem: 4000
-    default_args:
-      series_folders: ["inputs/seriesT2"]
-      use_folds: [0, 1, 2, 3, 4]
-      proba_threshold: 0.1
-      min_confidence: 0.5
-      tta: true
-      save_proba_map: true
-      checkpoint_name: "checkpoint_best.pth"
-  - id: prostate_aggressive_lesion
-    rel_path: prostate_aggressive_lesion_model
-    name: "Prostate aggressive lesion detection model"
-    aliases: [aggressive_lesion]
-    metadata: metadata_templates/prostate-aggressive-lesion.json
-    min_mem: 4000
-    default_args:
-      series_folders:
-        ["inputs/seriesT2", "inputs/seriesDWI", "inputs/seriesADC"]
-      use_folds: [0, 1, 2, 3, 4]
-      proba_threshold: 0.1
-      min_confidence: 0.5
-      tta: true
-      save_proba_map: true
-      checkpoint_name: "checkpoint_best.pth"
-      class_idx: 1 # required to save probability maps
-  - id: whole_body_ct
-    rel_path: Dataset300_body_6mm_1559subj
-    name: "Whole body CT segmentation model (from TotalSegmentator)"
-    aliases: [body_ct]
-    metadata: null
-    min_mem: 4000
-    default_args:
-      series_folders: ["inputs/seriesCT"]
-      use_folds: [0]
-      checkpoint_name: "checkpoint_final.pth"
-  - id: organ_ct
-    rel_path: Dataset291_TotalSegmentator_part1_organs_1559subj
-    name: "Organ CT segmentation model (from TotalSegmentator)"
-    metadata: null
-    min_mem: 4000
-    default_args:
-      series_folders: ["inputs/seriesCT"]
-      use_folds: [0]
-      checkpoint_name: "checkpoint_final.pth"
+  # totalsegmentator models can be specified as follows:
+  - id: total_ct
+    totalseg_task: "total_fastest"
+  - id: liver_segments
+    totalseg_task: "liver_segments"
+  # other models 
+  # (Note: this model is currently not available by default and this
+  # specification is provided only as an example)
   - id: hcc_arterial
     rel_path: hcc_arterial
     name: "HCC arterial phase segmentation model"
-    metadata: metadata_templates/hcc.json
+    metadata:
+      algorithm_name: "nnUNet"
+      algorithm_version: "v1.0"
+      manufacturer: "CCIG"
+      manufacturer_model_name: "CCIG"
+      series_description: "HCC segmentation"
+      body_part_examined: "BODY"
+      segment_names: ["Neoplasm"]
+    tta: false
     min_mem: 4000
     default_args:
       series_folders: ["inputs/seriesCT"]
