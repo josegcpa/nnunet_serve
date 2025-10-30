@@ -60,7 +60,8 @@ torch.serialization.add_safe_globals(
 
 logger = get_logger(__name__)
 
-PORT = int(os.environ.get("NNUNET_SERVE_PORT", "12345"))
+PORT = int(os.environ.get("UVICORN_PORT", "12345"))
+MAX_REQUESTS_PER_MINUTE = int(os.environ.get("MAX_REQUESTS_PER_MINUTE", "10"))
 TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 
@@ -663,10 +664,10 @@ def create_app() -> fastapi.FastAPI:
         with _rate_limit_lock:
             timestamps = _rate_limit_store.get(client_ip, [])
             timestamps = [t for t in timestamps if now - t < 60]
-            if len(timestamps) >= 10:
+            if len(timestamps) >= MAX_REQUESTS_PER_MINUTE:
                 raise fastapi.HTTPException(
                     status_code=429,
-                    detail="Too many requests, limit is 10 per minute",
+                    detail=f"Too many requests, limit is {MAX_REQUESTS_PER_MINUTE} per minute",
                 )
             timestamps.append(now)
             _rate_limit_store[client_ip] = timestamps
