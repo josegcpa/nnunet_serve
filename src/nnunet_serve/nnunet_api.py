@@ -26,6 +26,7 @@ from nnunet_serve.file_utils import (
     get_study_path,
     store_uploaded_file,
     zip_directory,
+    NNUNET_OUTPUT_DIR,
 )
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.nnunet_api_utils import (
@@ -213,7 +214,7 @@ class nnUNetAPI:
             raise ValueError("No GPU available")
         self.model_dictionary, self.alias_dict = get_model_dictionary()
         # Initialise SQLite DB for zip storage
-        self._db_path = Path("/tmp/nnunet/zip_store.db")
+        self._db_path = Path(f"{NNUNET_OUTPUT_DIR}/zip_store.db")
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_conn = sqlite3.connect(self._db_path)
         self._init_db()
