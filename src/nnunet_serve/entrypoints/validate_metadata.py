@@ -1,5 +1,5 @@
 from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.nnunet_serve import get_model_dictionary
+from nnunet_serve.nnunet_api import get_model_dictionary
 from nnunet_serve.seg_writers import SegWriter
 
 logger = get_logger(__name__)
