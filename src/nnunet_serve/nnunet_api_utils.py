@@ -33,6 +33,7 @@ from nnunet_serve.utils import (
     read_dicom_as_sitk,
     remove_small_objects,
 )
+from nnunet_serve.api_datamodels import InferenceRequestBase
 from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 
 logger = get_logger(__name__)
@@ -304,11 +305,18 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
     Returns:
         dict: correctly formatted default arguments.
     """
+    default_params_request = {
+        k: v
+        for k, v in InferenceRequestBase(nnunet_id="", output_dir="")
+        .model_dump()
+        .items()
+    }
     args_with_mult_support = [
         "proba_threshold",
         "min_confidence",
         "class_idx",
         "series_folders",
+        "use_folds",
     ]
     if isinstance(default_args, dict):
         default_params = default_args
@@ -317,11 +325,15 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
         for curr_default_args in default_args:
             for k in curr_default_args:
                 if k in args_with_mult_support:
-                    if k not in default_params:
-                        default_params[k] = []
-                    default_params[k].append(curr_default_args[k])
+                    default_params[k] = []
                 else:
                     default_params[k] = curr_default_args[k]
+        for k in default_params:
+            if k in args_with_mult_support:
+                default_params[k] = [
+                    d.get(k, default_params_request.get(k, None))
+                    for d in default_args
+                ]
     else:
         raise ValueError("default_args should either be dict or list")
     return default_params
@@ -349,6 +361,8 @@ def load_predictor(
     Returns:
         nnUNetPredictor: A loaded nnUNetPredictor instance.
     """
+    if isinstance(use_folds, int):
+        use_folds = [use_folds]
     args_hash = hash(
         tuple(
             [
@@ -763,6 +777,7 @@ def single_model_inference(
 
     volumes = [resample_image(volume, spacing) for volume in volumes]
     logger.info("Running inference using %s", nnunet_path)
+    logger.info("Folds: %s", use_folds)
     input_array = np.stack([sitk.GetArrayFromImage(v) for v in volumes])
     image_properties = {
         "spacing": volumes[0].GetSpacing()[::-1],
@@ -957,6 +972,7 @@ def multi_model_inference(
         checkpoint_name_list = coherce_to_list(
             checkpoint_name, len(nnunet_path)
         )
+        use_folds = coherce_to_list(use_folds, len(nnunet_path))
 
         if series_paths_list is None:
             raise ValueError(
@@ -991,7 +1007,7 @@ def multi_model_inference(
                 device_id=device_id,
                 output_dir=out,
                 tmp_dir=os.path.join(tmp_dir, f"stage_{i}"),
-                use_folds=use_folds,
+                use_folds=use_folds[i],
                 proba_threshold=proba_threshold[i],
                 min_confidence=min_confidence[i],
                 intersect_with=intersect_with,

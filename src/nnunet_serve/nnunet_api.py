@@ -377,6 +377,9 @@ class nnUNetAPI:
             JSONResponse: Inference response.
         """
         params = inference_request.__dict__
+        if isinstance(params["cascade_mode"], list) is False:
+            params["cascade_mode"] = [params["cascade_mode"]]
+        params["cascade_mode"] = [x.value for x in params["cascade_mode"]]
         nnunet_id = params["nnunet_id"]
         if isinstance(nnunet_id, str):
             if nnunet_id not in self.alias_dict:
@@ -389,7 +392,7 @@ class nnUNetAPI:
                         "gpu": None,
                         "nnunet_path": None,
                         "metadata": None,
-                        "request": inference_request.__dict__,
+                        "request": params,
                         "status": FAILURE_STATUS,
                         "error": f"{nnunet_id} is not a valid nnunet_id",
                     },
@@ -420,7 +423,7 @@ class nnUNetAPI:
                             "gpu": None,
                             "nnunet_path": None,
                             "metadata": None,
-                            "request": inference_request.__dict__,
+                            "request": params,
                             "status": FAILURE_STATUS,
                             "error": error_str,
                         },
@@ -458,7 +461,7 @@ class nnUNetAPI:
                     "nnunet_path": None,
                     "metadata": None,
                     "status": FAILURE_STATUS,
-                    "request": inference_request.__dict__,
+                    "request": params,
                     "error": error_str,
                 },
                 status_code=400,
@@ -481,7 +484,7 @@ class nnUNetAPI:
                     "nnunet_path": None,
                     "metadata": None,
                     "status": FAILURE_STATUS,
-                    "request": inference_request.__dict__,
+                    "request": params,
                     "error": error_msg,
                 },
                 status_code=400,
@@ -500,7 +503,7 @@ class nnUNetAPI:
                     "nnunet_path": None,
                     "metadata": None,
                     "status": FAILURE_STATUS,
-                    "request": inference_request.__dict__,
+                    "request": params,
                     "error": str(e),
                 },
                 status_code=503,
@@ -554,7 +557,7 @@ class nnUNetAPI:
             "gpu": device_id,
             "nnunet_path": nnunet_path,
             "metadata": metadata,
-            "request": inference_request.__dict__,
+            "request": params,
             "status": status,
             "error": error,
             **output_paths,

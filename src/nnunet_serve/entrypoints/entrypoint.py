@@ -30,7 +30,7 @@ def main_with_args(args):
         class_idx=args.class_idx,
         tmp_dir=args.tmp_dir,
         is_dicom=args.is_dicom,
-        use_folds=args.folds,
+        use_folds=args.use_folds,
         tta=args.tta,
         proba_threshold=args.proba_threshold,
         intersect_with=args.intersect_with,
@@ -87,7 +87,6 @@ def main():
     args = parser.parse_args()
 
     args.output_dir = args.output_dir.strip().rstrip("/")
-    args.folds = [int(f) for f in args.folds]
     pprint.pprint(main_with_args(args))
 
     torch.cuda.empty_cache()

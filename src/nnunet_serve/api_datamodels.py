@@ -14,15 +14,6 @@ class CheckpointName(Enum):
     BEST = "checkpoint_best.pth"
 
 
-class Folds(Enum):
-    ALL = "all"
-    ZERO = 0
-    ONE = 1
-    TWO = 2
-    THREE = 3
-    FOUR = 4
-
-
 class InferenceRequestBase(BaseModel):
     """
     Data model for the inference request from local data. Supports providing
@@ -61,7 +52,7 @@ class InferenceRequestBase(BaseModel):
         description="Whether to apply test-time augmentation (use_mirroring)",
         default=False,
     )
-    use_folds: list[Folds] = Field(
+    use_folds: list[int | str] | list[str | int | list[int | str]] = Field(
         description="Which folds should be used", default_factory=lambda: [0]
     )
     proba_threshold: float | list[float | None] | None = Field(
@@ -116,14 +107,8 @@ class InferenceRequestBase(BaseModel):
             )
         if isinstance(self.checkpoint_name, list) is False:
             self.checkpoint_name = [self.checkpoint_name]
-        self.__internal_update_field(
-            "checkpoint_name", [mode.value for mode in self.checkpoint_name]
-        )
         if isinstance(self.cascade_mode, list) is False:
             self.cascade_mode = [self.cascade_mode]
-        self.__internal_update_field(
-            "cascade_mode", [mode.value for mode in self.cascade_mode]
-        )
 
 
 class InferenceRequest(InferenceRequestBase):

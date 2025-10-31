@@ -31,7 +31,6 @@ def main_with_args(args):
     if "SERIES_PATHS" in os.environ:
         args.series_paths = os.environ["SERIES_PATHS"].split(" ")
 
-    args.folds = [int(f) for f in args.folds]
     main_with_args(args)
 
     timer.print_time()

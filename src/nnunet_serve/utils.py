@@ -635,7 +635,7 @@ def make_parser(
         required=True,
     )
     parser.add_argument(
-        "--folds",
+        "--use_folds",
         "-f",
         help="Sets which folds should be used with nnUNet",
         nargs="+",
