@@ -367,9 +367,6 @@ class SegWriter:
                     segment_description.segmented_property_type.meaning,
                     i,
                 )
-                logger.info(
-                    segment_description.SegmentedPropertyTypeCodeSequence
-                )
 
     def to_array_if_necessary(
         self, mask: np.ndarray | sitk.Image
