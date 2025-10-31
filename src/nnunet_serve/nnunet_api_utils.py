@@ -33,7 +33,7 @@ from nnunet_serve.utils import (
     read_dicom_as_sitk,
     remove_small_objects,
 )
-from nnunet_serve.api_datamodels import InferenceRequestBase
+from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
 from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 
 logger = get_logger(__name__)
@@ -389,6 +389,8 @@ def load_predictor(
         verbose_preprocessing=False,
         allow_tqdm=True,
     )
+    if isinstance(checkpoint_name, CheckpointName):
+        checkpoint_name = checkpoint_name.value
     predictor.initialize_from_trained_model_folder(
         nnunet_path,
         use_folds=use_folds,
