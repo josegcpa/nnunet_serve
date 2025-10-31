@@ -19,7 +19,12 @@ import yaml
 from fastapi import File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from totalsegmentator.libs import download_pretrained_weights
-from totalsegmentator.map_to_binary import class_map
+from totalsegmentator.map_to_binary import (
+    class_map,
+    class_map_5_parts,
+    class_map_parts_mr,
+    class_map_parts_headneck_muscles,
+)
 
 from nnunet_serve.api_datamodels import InferenceRequest, InferenceResponse
 from nnunet_serve.file_utils import (
@@ -40,6 +45,7 @@ from nnunet_serve.nnunet_api_utils import (
 )
 from nnunet_serve.totalseg_utils import (
     TASK_CONVERSION,
+    REVERSE_TASK_CONVERSION,
     load_snomed_mapping_expanded,
 )
 from nnunet_serve.utils import get_gpu_memory, wait_for_gpu
@@ -54,6 +60,24 @@ torch.serialization.add_safe_globals(
         np.dtypes.Float64DType,
         np.dtypes.Float32DType,
     ]
+)
+
+class_map.update(
+    {
+        "organ_ct": class_map_5_parts["class_map_part_organs"],
+        "vertebrae_ct": class_map_5_parts["class_map_part_vertebrae"],
+        "cardiac_ct": class_map_5_parts["class_map_part_cardiac"],
+        "muscle_ct": class_map_5_parts["class_map_part_muscles"],
+        "ribs_ct": class_map_5_parts["class_map_part_ribs"],
+        "organ_mr": class_map_parts_mr["class_map_part_organs"],
+        "muscles_mr": class_map_parts_mr["class_map_part_muscles"],
+        "headneck_muscles_1": class_map_parts_headneck_muscles[
+            "class_map_part_muscles_1"
+        ],
+        "headneck_muscles_2": class_map_parts_headneck_muscles[
+            "class_map_part_muscles_2"
+        ],
+    }
 )
 
 TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
@@ -120,10 +144,20 @@ def get_model_dictionary() -> tuple[dict, dict]:
             task = model["totalseg_task"]
             task_clean = task.replace("_fastest", "").replace("_fast", "")
             task_id = TASK_CONVERSION[task]
-            download_pretrained_weights(task_id)
+            if isinstance(task_id, list):
+                possibilities = [REVERSE_TASK_CONVERSION[t] for t in task_id]
+                raise ValueError(
+                    "nnunet_serve currently does not support TotalSegmentator multi-part models. "
+                    f"Consider using one of the following: {possibilities}."
+                    "If multi-part segmentation is important for you: please open an issue at "
+                    "https://github.com/josegcpa/nnunet_serve/issues and we will try to push "
+                    "this forward."
+                )
+            else:
+                download_pretrained_weights(task_id)
             matches = glob(os.path.join(totalseg_dir, f"*{task_id}*"))
             if not matches:
-                raise FileNotFoundError(
+                raise ValueError(
                     f"Could not find TotalSegmentator weights for task_id '{task_id}' under '{totalseg_dir}'."
                 )
             model["rel_path"] = matches[0].replace(

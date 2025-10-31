@@ -3,10 +3,15 @@ from totalsegmentator.dicom_utils import load_snomed_mapping
 TASK_CONVERSION = {
     "total_fast": 297,
     "total_fastest": 298,
-    "total": [291, 292, 293, 294, 295],
+    "organ_ct": 291,
+    "vertebrae_ct": 292,
+    "cardiac_ct": 293,
+    "muscle_ct": 294,
+    "ribs_ct": 295,
+    "organ_mr": 850,
+    "vertebrae_mr": 851,
     "total_mr_fast": 852,
     "total_mr_fastest": 853,
-    "total_mr": [850, 851],
     "lung_vessels": 258,
     "cerebral_bleed": 150,
     "hip_implant": 260,
@@ -20,6 +25,11 @@ TASK_CONVERSION = {
     "head_glands_cavities": 775,
     "headneck_bones_vessels": 776,
     "head_muscles": 777,
+    "headneck_muscles_1": 778,
+    "headneck_muscles_2": 779,
+    # multi-part models not supported
+    "total": [291, 292, 293, 294, 295],
+    "total_mr": [850, 851],
     "headneck_muscles": [778, 779],
     "oculomotor_muscles": 351,
     "lung_nodules": 913,
@@ -46,6 +56,10 @@ TASK_CONVERSION = {
     "thigh_shoulder_muscles_mr": 857,
     "coronary_arteries": 507,
     "aortic_sinuses": 920,
+}
+
+REVERSE_TASK_CONVERSION = {
+    v: k for k, v in TASK_CONVERSION.items() if isinstance(v, int)
 }
 
 ADDITIONAL_SNOMED_TYPES = {
