@@ -9,6 +9,7 @@ from typing import Any, Union
 import numpy as np
 import SimpleITK as sitk
 import torch
+from cachetools import TTLCache
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from batchgenerators.dataloading.multi_threaded_augmenter import (
     MultiThreadedAugmenter,
@@ -37,6 +38,7 @@ from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
 FAILURE_STATUS = "failed"
+CACHE = TTLCache(maxsize=4, ttl=300)
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
 
@@ -325,6 +327,63 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
     return default_params
 
 
+def load_predictor(
+    nnunet_path: str,
+    checkpoint_name: str,
+    mirroring: bool,
+    device_id: int,
+    use_folds: bool,
+) -> nnUNetPredictor:
+    """
+    Loads a nnUNetPredictor instance from a trained model folder.
+    Keeps everything in cache using a time-to-live cache, enabling batch-based
+    operations.
+
+    Args:
+        mirroring (bool): Whether to use mirroring during inference.
+        device_id (int): GPU identifier.
+        nnunet_path (str): Path to the nnUNet model folder.
+        use_folds (bool): Whether to use folds during inference.
+        checkpoint_name (str): Name of the checkpoint to use.
+
+    Returns:
+        nnUNetPredictor: A loaded nnUNetPredictor instance.
+    """
+    args_hash = hash(
+        tuple(
+            [
+                str(x)
+                for x in (
+                    mirroring,
+                    device_id,
+                    nnunet_path,
+                    use_folds,
+                    checkpoint_name,
+                )
+            ]
+        )
+    )
+    if args_hash in CACHE:
+        return CACHE[args_hash]
+    predictor = nnUNetPredictor(
+        tile_step_size=0.5,
+        use_gaussian=True,
+        use_mirroring=mirroring,
+        device=torch.device("cuda", device_id),
+        perform_everything_on_device=True,
+        verbose=False,
+        verbose_preprocessing=False,
+        allow_tqdm=True,
+    )
+    predictor.initialize_from_trained_model_folder(
+        nnunet_path,
+        use_folds=use_folds,
+        checkpoint_name=checkpoint_name,
+    )
+    CACHE[args_hash] = predictor
+    return predictor
+
+
 def predict(
     series_paths: list,
     metadata: str | None,
@@ -356,19 +415,6 @@ def predict(
         raise RuntimeError(
             "CUDA is not available but GPU inference was requested"
         )
-    try:
-        predictor = nnUNetPredictor(
-            tile_step_size=0.5,
-            use_gaussian=True,
-            use_mirroring=mirroring,
-            device=torch.device("cuda", device_id),
-            perform_everything_on_device=True,
-            verbose=False,
-            verbose_preprocessing=False,
-            allow_tqdm=True,
-        )
-    except Exception as e:
-        raise RuntimeError(f"Failed to initialize nnUNetPredictor: {e}") from e
 
     inference_param_names = [
         "output_dir",
@@ -429,9 +475,10 @@ def predict(
             all_volumes,
         ) = multi_model_inference(
             series_paths=series_paths,
-            predictor=predictor,
             nnunet_path=nnunet_path,
             flip_xy=flip_xy,
+            mirroring=mirroring,
+            device_id=device_id,
             **inference_params,
         )
     except torch.cuda.OutOfMemoryError as e:
@@ -455,7 +502,6 @@ def predict(
     except Exception as e:
         raise RuntimeError(f"Failed to export predictions: {e}") from e
 
-    del predictor
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return output_paths
@@ -611,12 +657,13 @@ def process_mask(
 
 
 def single_model_inference(
-    predictor: nnUNetPredictor,
     nnunet_path: str,
     volumes: list[sitk.Image],
     output_dir: str,
     class_idx: int | list[int] | None = None,
     checkpoint_name: str = "checkpoint_best.pth",
+    mirroring: bool = False,
+    device_id: int = 0,
     tmp_dir: str = ".tmp",
     use_folds: list[int] = [0],
     proba_threshold: float | None = None,
@@ -633,7 +680,6 @@ def single_model_inference(
     Runs the inference for a single model.
 
     Args:
-        predictor (nnUNetPredictor): nnUNet predictor.
         nnunet_path (str): path to nnUNet model.
         series (list[str]): series volumes or paths to series.
         output_dir (str): output directory.
@@ -641,6 +687,9 @@ def single_model_inference(
             output. Defaults to 1.
         checkpoint_name (str, optional): name of checkpoint in nnUNet model.
             Defaults to "checkpoint_best.pth".
+        mirroring (bool, optional): whether to use mirroring during inference.
+            Defaults to False.
+        device_id (int, optional): GPU identifier. Defaults to 0.
         tmp_dir (str, optional): directory where temporary outputs are stored.
             Defaults to ".tmp".
         use_folds (list[int], optional): which folds from the nnUNet model will be
@@ -677,10 +726,12 @@ def single_model_inference(
     """
 
     # initializes the network architecture, loads the checkpoint
-    predictor.initialize_from_trained_model_folder(
-        nnunet_path,
-        use_folds=use_folds,
+    predictor = load_predictor(
+        nnunet_path=nnunet_path,
         checkpoint_name=checkpoint_name,
+        mirroring=mirroring,
+        device_id=device_id,
+        use_folds=use_folds,
     )
     input_spacing = volumes[0].GetSpacing()
     original_size = volumes[0].GetSize()
@@ -814,11 +865,12 @@ def get_info(dataset_json_path: str) -> dict:
 
 
 def multi_model_inference(
-    predictor: nnUNetPredictor,
     nnunet_path: str | list[str],
     series_paths: list[str] | list[list[str]],
     output_dir: str,
     class_idx: int | list[int] | list[list[int]] | None = None,
+    mirroring: bool = False,
+    device_id: int = 0,
     checkpoint_name: str | list[str] = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
     is_dicom: bool = False,
@@ -836,7 +888,6 @@ def multi_model_inference(
     Prediction wraper for multiple models. Exports the outputs.
 
     Args:
-        predictor (nnUNetPredictor): nnUNetPredictor object.
         nnunet_path (str | list[str]): path or paths to nnUNet models.
         series_paths (list[str] | list[list[str]]): list of paths or list of
             list of paths corresponding to series.
@@ -845,6 +896,9 @@ def multi_model_inference(
             export probability maps. Defaults to 1.
         checkpoint_name (str | list[str], optional): name of nnUNet checkpoint.
             Defaults to "checkpoint_best.pth".
+        mirroring (bool, optional): whether to use mirroring during inference.
+            Defaults to False.
+        device_id (int, optional): GPU identifier. Defaults to 0.
         tmp_dir (str, optional): temporary directory. Defaults to ".tmp".
         is_dicom (bool, optional): whether the input/output is DICOM. Defaults
             to False.
@@ -929,11 +983,12 @@ def multi_model_inference(
             else:
                 out = os.path.join(tmp_dir, f"stage_{i}")
             mask, proba_map = single_model_inference(
-                predictor=predictor,
                 nnunet_path=nnunet_path[i],
                 volumes=all_volumes[i],
                 class_idx=class_idx_list[i],
                 checkpoint_name=checkpoint_name_list[i],
+                mirroring=mirroring,
+                device_id=device_id,
                 output_dir=out,
                 tmp_dir=os.path.join(tmp_dir, f"stage_{i}"),
                 use_folds=use_folds,
@@ -968,10 +1023,11 @@ def multi_model_inference(
             series_paths, is_dicom
         )
         mask, proba_map = single_model_inference(
-            predictor=predictor,
             nnunet_path=nnunet_path,
             volumes=all_volumes[0],
             checkpoint_name=checkpoint_name,
+            mirroring=mirroring,
+            device_id=device_id,
             output_dir=output_dir,
             tmp_dir=tmp_dir,
             use_folds=use_folds,
