@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import time
 import uuid
+import asyncio
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
@@ -36,6 +37,7 @@ from nnunet_serve.nnunet_api_utils import (
     get_info,
     get_series_paths,
     predict,
+    CACHE,
 )
 from nnunet_serve.totalseg_utils import (
     TASK_CONVERSION,
@@ -319,6 +321,30 @@ class nnUNetAPI:
             self.readyz,
             methods=["GET"],
             response_model=dict[str, Any],
+        )
+        self.app.add_api_route(
+            "/expire",
+            self.expire,
+            methods=["GET"],
+            response_model=dict[str, Any],
+        )
+
+    def expire(self):
+        """
+        Calls the TTL cache expire method.
+        """
+        n_items = 0
+        try:
+            n_items = len(CACHE.expire())
+        except Exception as e:
+            logger.error("Failed to expire cache: %s", e)
+            return JSONResponse(
+                status_code=500,
+                content={"status": "error", "message": str(e)},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ok", "message": f"Expired {n_items} items"},
         )
 
     def model_info(self):

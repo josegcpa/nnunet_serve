@@ -11,8 +11,11 @@ import time
 
 import fastapi
 import uvicorn
+import asyncio
+from contextlib import asynccontextmanager
 
 from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.nnunet_api_utils import CACHE
 from nnunet_serve.nnunet_api import nnUNetAPI
 
 logger = get_logger(__name__)
@@ -26,6 +29,22 @@ _rate_limit_store: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
 
 
+async def expire_cache():
+    CACHE.expire()
+
+
+async def expire_cache_runner():
+    while True:
+        asyncio.create_task(expire_cache())
+        await asyncio.sleep(30)
+
+
+@asynccontextmanager
+async def lifespan(app: fastapi.FastAPI):
+    expire_cache_runner()
+    yield
+
+
 def create_app() -> fastapi.FastAPI:
     """
     Creates a FastAPI application.
@@ -33,7 +52,7 @@ def create_app() -> fastapi.FastAPI:
     Returns:
         fastapi.FastAPI: FastAPI application.
     """
-    app = fastapi.FastAPI()
+    app = fastapi.FastAPI(lifespan=lifespan)
 
     @app.middleware("http")
     async def _rate_limit_middleware(request: fastapi.Request, call_next):
