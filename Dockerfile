@@ -5,6 +5,7 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
 ENV UVICORN_HOST=0.0.0.0
 ENV UVICORN_PORT=50422
+ENV NNUNET_OUTPUT_DIR=/data/nnunet
 
 # install internal dependencies
 COPY docker-installations.sh docker-installations.sh
@@ -33,5 +34,6 @@ COPY metadata metadata
 # create accessory directories
 RUN mkdir -p /tmp 
 RUN mkdir -p /models
+RUN mkdir -p $NNUNET_OUTPUT_DIR
 
 ENTRYPOINT ["uv", "run", "uvicorn", "nnunet_serve.nnunet_serve:create_app"]
