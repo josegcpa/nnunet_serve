@@ -2,9 +2,10 @@
 Maps type or modifier concepts to SNOMED CT category codes.
 """
 
-from nnunet_serve.str_processing import to_camel_case
-from pydicom.sr._concepts_dict import concepts as CONCEPTS
 from highdicom.sr.coding import CodedConcept
+from pydicom.sr._concepts_dict import concepts as CONCEPTS
+
+from nnunet_serve.str_processing import to_camel_case
 
 CATEGORY_MAPPING = {}
 
@@ -720,10 +721,7 @@ CATEGORY_MAPPING["SCT"] = {
         "12989004": "91723000",
         "23215003": "91723000",
         "29700009": "91723000",
-        "32062004": "91723000",
-        "8887007": "91723000",
         "68786006": "91723000",
-        "48345005": "91723000",
         "110765007": "91723000",
         "29836001": "91723000",
         "181674001": "91723000",
@@ -743,20 +741,6 @@ CATEGORY_MAPPING["SCT"] = {
         "77644006": "91723000",
         "58830002": "91723000",
         "43993008": "91723000",
-        "48535007": "91723000",
-        "78247007": "91723000",
-        "25888004": "91723000",
-        "25523003": "91723000",
-        "15339008": "91723000",
-        "59558009": "91723000",
-        "24915002": "91723000",
-        "5953002": "91723000",
-        "22565002": "91723000",
-        "77644006": "91723000",
-        "58830002": "91723000",
-        "43993008": "91723000",
-        "54735007": "91723000",
-        "79601000": "91723000",
     },
     "modifier": {
         "24028007": "91723000",

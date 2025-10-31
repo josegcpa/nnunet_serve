@@ -3,6 +3,9 @@ General utilities.
 """
 
 import argparse
+import subprocess as sp
+import time
+from typing import Sequence
 from glob import glob
 
 import numpy as np
@@ -13,8 +16,6 @@ from scipy import ndimage
 from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
-
-from typing import Sequence
 
 
 RESCALE_INTERCEPT_TAG = (0x0028, 0x1052)
@@ -159,112 +160,6 @@ def filter_by_bvalue(
     ]
     dicom_files = [f for f, b in zip(dicom_files, bvalues) if b == best_bvalue]
     return dicom_files
-
-
-def resample_image_to_target(
-    moving: sitk.Image,
-    target: sitk.Image,
-    is_mask: bool = False,
-) -> sitk.Image:
-    """
-    Resamples a SimpleITK image to the space of a target image.
-
-    Args:
-      moving: The SimpleITK image to resample.
-      target: The target SimpleITK image to match.
-      is_mask (bool): whether the moving image is a label mask.
-
-    Returns:
-      The resampled SimpleITK image matching the target properties.
-    """
-    if is_mask:
-        interpolation = sitk.sitkLabelLinear
-    else:
-        interpolation = sitk.sitkBSpline
-
-    output = sitk.Resample(moving, target, sitk.Transform(), interpolation, 0)
-    return output
-
-
-def resample_image(
-    sitk_image: sitk.Image,
-    out_spacing: Sequence[float] = [1.0, 1.0, 1.0],
-    out_size: Sequence[int] = None,
-    out_direction: Sequence[float] = None,
-    out_origin: Sequence[float] = None,
-    is_mask: bool = False,
-    interpolator=sitk.sitkLinear,
-) -> sitk.Image:
-    """Resamples an SITK image to out_spacing. If is_mask is True, uses
-    nearest neighbour interpolation. Otherwise, it uses B-splines.
-
-    Args:
-        sitk_image (sitk.Image): SITK image.
-        out_spacing (Sequence, optional): target spacing for the image.
-            Defaults to [1.0, 1.0, 1.0].
-        is_mask (bool, optional): sets the interpolation to nearest neighbour.
-            Defaults to False.
-        interpolator (optional): interpolation method.
-            Defaults to sitk.sitkLinear.
-
-    Returns:
-        sitk.Image: resampled SITK image.
-    """
-    original_spacing = sitk_image.GetSpacing()
-    original_size = sitk_image.GetSize()
-
-    if out_direction is None:
-        out_direction = sitk_image.GetDirection()
-
-    if out_origin is None:
-        out_origin = sitk_image.GetOrigin()
-
-    if out_size is None:
-        out_size = [
-            round(or_size * (or_spac / out_spac))
-            for or_size, or_spac, out_spac in zip(
-                original_size, original_spacing, out_spacing
-            )
-        ]
-
-    resample = sitk.ResampleImageFilter()
-    resample.SetOutputSpacing(out_spacing)
-    resample.SetSize(out_size)
-    resample.SetOutputDirection(out_direction)
-    resample.SetOutputOrigin(out_origin)
-    resample.SetTransform(sitk.Transform())
-    resample.SetDefaultPixelValue(0)
-
-    if is_mask is True:
-        resample.SetInterpolator(sitk.sitkLabelLinear)
-    else:
-        resample.SetInterpolator(interpolator)
-
-    output: sitk.Image = resample.Execute(sitk_image)
-
-    return output
-
-
-def resample_sitk_bicubic(image, new_spacing):
-    old_spacing = np.array(image.GetSpacing())
-    old_size = np.array(image.GetSize())
-
-    new_size = np.round(
-        old_size * (old_spacing / np.array(new_spacing))
-    ).astype(int)
-
-    arr = sitk.GetArrayFromImage(image)
-
-    zoom_factors = old_spacing[::-1] / np.array(new_spacing[::-1])
-
-    arr_resampled = ndimage.zoom(arr, zoom_factors, order=3)
-
-    resampled = sitk.GetImageFromArray(arr_resampled)
-    resampled.SetOrigin(image.GetOrigin())
-    resampled.SetDirection(image.GetDirection())
-    resampled.SetSpacing(new_spacing)
-
-    return resampled
 
 
 def remove_small_objects(
@@ -483,65 +378,6 @@ def export_to_dicom_seg_dcmqi(
     return "success"
 
 
-def export_dicom_files(
-    output_dir: str,
-    prediction_name: str,
-    probabilities_name: str,
-    metadata_path: str,
-    fractional_metadata_path: str,
-    fractional_as_segments: bool,
-    dicom_file_paths: list[str],
-    proba_map: sitk.Image,
-    save_proba_map: bool,
-    class_idx: int | None = None,
-):
-    """
-    Convenience function to export DICOM files.
-
-    Args:
-        output_dir (str): output directory.
-        prediction_name (str): name for binary or multi-class prediction file.
-        probabilities_name (str): name for probability prediction file.
-        struct_name (str): name for RT struct file.
-        metadata_path (str): path to metadata file (required for DICOM seg).
-        fractional_metadata_path (str): path to fractional metadata file (
-            required for DICOM seg). If ``None`` defaults to ``metadata_path``.
-        fractional_as_segments (bool): whether ``proba_map`` should be divided
-            into discrete classes according to the number of classes specified
-            in ``fractional_metadata_path``.
-        dicom_file_paths (list[str]): paths to the input DICOM file paths.
-        mask (sitk.Image): image corresponding to mask prediction.
-        proba_map (sitk.Image): image corresponding to probability map.
-        save_proba_map (bool): whether the probability map should be saved.
-        save_rt_struct (bool): whether the RT struct file should be saved.
-        class_idx (int | None, optional): index corresponding to the class which
-            should be used to export the fractional DICOM seg and the
-            exported probability map. Defaults to None.
-    """
-    mask_path = f"{output_dir}/{prediction_name}.nii.gz"
-    export_to_dicom_seg_dcmqi(
-        mask_path=mask_path,
-        metadata_path=metadata_path,
-        file_paths=dicom_file_paths,
-        output_dir=output_dir,
-        output_file_name=prediction_name,
-    )
-
-    if save_proba_map is True and class_idx is not None:
-        if fractional_metadata_path is None:
-            curr_metadata_path = metadata_path
-        else:
-            curr_metadata_path = fractional_metadata_path
-        export_fractional_dicom_seg(
-            proba_map,
-            metadata_path=curr_metadata_path,
-            file_paths=dicom_file_paths,
-            output_dir=output_dir,
-            output_file_name=probabilities_name,
-            fractional_as_segments=fractional_as_segments,
-        )
-
-
 def calculate_iou(a: np.ndarray, b: np.ndarray) -> float:
     """
     Calculates the intersection of the union between arrays a and b.
@@ -694,6 +530,59 @@ def extract_lesion_candidates(
         all_hard_blobs += hard_blob
         confidences.append((idx, max_prob))
     return all_hard_blobs, confidences, blobs_index
+
+
+def get_gpu_memory() -> list[int]:
+    """
+    Utility to retrieve value for free GPU memory.
+
+    Returns:
+        list[int]: list of available GPU memory (each one corresponds to a GPU
+            index).
+    """
+    command = "nvidia-smi --query-gpu=memory.free --format=csv"
+    try:
+        memory_free_info = (
+            sp.check_output(command.split())
+            .decode("ascii")
+            .split("\n")[:-1][1:]
+        )
+        memory_free_values = [
+            int(x.split()[0]) for i, x in enumerate(memory_free_info)
+        ]
+        return memory_free_values
+    except (sp.CalledProcessError, FileNotFoundError) as e:
+        raise RuntimeError(
+            "nvidia-smi is not available or failed to run"
+        ) from e
+
+
+def wait_for_gpu(min_mem: int, timeout_s: int = 120) -> int:
+    """
+    Waits for a GPU with at least ``min_mem`` free memory to be free.
+
+    Args:
+        min_mem (int): minimum amount of memory.
+
+    Returns:
+        int: GPU ID corresponding to freest GPU.
+    """
+    start = time.time()
+    while True:
+        gpu_memory = get_gpu_memory()
+        if len(gpu_memory) == 0:
+            raise RuntimeError("No GPUs detected")
+        max_gpu_memory = max(gpu_memory)
+        device_id = [
+            i for i in range(len(gpu_memory)) if gpu_memory[i] == max_gpu_memory
+        ][0]
+        if max_gpu_memory > min_mem:
+            return device_id
+        if time.time() - start > timeout_s:
+            raise TimeoutError(
+                f"Timeout waiting for a GPU with at least {min_mem} MiB free. Max available: {max_gpu_memory} MiB"
+            )
+        time.sleep(0.5)
 
 
 def make_parser(

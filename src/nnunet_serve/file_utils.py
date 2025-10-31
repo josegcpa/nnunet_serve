@@ -1,11 +1,11 @@
 import os
-import uuid
 import shutil
-import zipfile
 import tarfile
+import uuid
+import zipfile
 from pathlib import Path
-from fastapi import HTTPException
-from fastapi import UploadFile
+
+from fastapi import HTTPException, UploadFile
 
 ALLOWED_EXTENSIONS = {".zip", ".tar", ".gz", ".tgz"}
 

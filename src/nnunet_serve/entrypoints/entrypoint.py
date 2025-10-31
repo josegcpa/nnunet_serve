@@ -3,19 +3,23 @@ Command line utility to perform nnU-Net inference on a single study in SITK
 or DICOM format.
 """
 
-import os
-import sys
 import json
+import os
 import pprint
 import shutil
-import torch
+import sys
+import asyncio
 from pathlib import Path
+
+import torch
+
+from nnunet_serve.nnunet_api import nnUNetAPI
+from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
+from nnunet_serve.api_datamodels import InferenceRequest
 from nnunet_serve.utils import make_parser
-from nnunet_serve.nnunet_serve_utils import InferenceRequest, SUCCESS_STATUS
-from nnunet_serve.nnunet_serve import nnUNetAPI
 
 
-def main(args):
+def main_with_args(args):
     nnunet_api = nnUNetAPI()
 
     inference_request = InferenceRequest(
@@ -49,7 +53,10 @@ def main(args):
         if k in all_set_args
     ]
 
-    response_obj = nnunet_api.infer(inference_request)
+    loop = asyncio.get_event_loop()
+    response_obj = loop.run_until_complete(
+        asyncio.ensure_future(nnunet_api.infer(inference_request))
+    )
     status_code = getattr(response_obj, "status_code", 200)
     response = json.loads(response_obj.body.decode("utf-8"))
 
@@ -74,13 +81,17 @@ def main(args):
     return response
 
 
-if __name__ == "__main__":
+def main():
     parser = make_parser()
 
     args = parser.parse_args()
 
     args.output_dir = args.output_dir.strip().rstrip("/")
     args.folds = [int(f) for f in args.folds]
-    pprint.pprint(main(args))
+    pprint.pprint(main_with_args(args))
 
     torch.cuda.empty_cache()
+
+
+if __name__ == "__main__":
+    main()

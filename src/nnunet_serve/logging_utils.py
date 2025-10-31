@@ -4,7 +4,6 @@ Minimal utilities for logging.
 
 import logging
 import os
-import re
 from pathlib import Path
 
 LOGS_DIR = os.environ.get("LOGS_DIR", "./logs")

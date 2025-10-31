@@ -4,9 +4,6 @@ Utilities for nnU-Net model serving.
 
 import json
 import os
-import time
-import subprocess as sp
-from enum import Enum
 from typing import Any, Union
 
 import numpy as np
@@ -24,228 +21,24 @@ from nnunetv2.utilities.plans_handling.plans_handler import (
     ConfigurationManager,
     PlansManager,
 )
-from pydantic import BaseModel, ConfigDict, Field
 
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter
+from nnunet_serve.sitk_utils import get_crop, to_closest_canonical_sitk
 from nnunet_serve.utils import (
     copy_information_nd,
     extract_lesion_candidates,
     intersect,
     read_dicom_as_sitk,
-    resample_image_to_target,
-    resample_image,
     remove_small_objects,
 )
+from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 
 logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
 FAILURE_STATUS = "failed"
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
-
-
-class CascadeMode(Enum):
-    INTERSECT = "intersect"
-    CROP = "crop"
-
-
-class CheckpointName(Enum):
-    FINAL = "checkpoint_final.pth"
-    BEST = "checkpoint_best.pth"
-
-
-class Folds(Enum):
-    ALL = "all"
-    ZERO = 0
-    ONE = 1
-    TWO = 2
-    THREE = 3
-    FOUR = 4
-
-
-class InferenceRequestBase(BaseModel):
-    """
-    Data model for the inference request from local data. Supports providing
-    multiple nnUNet model identifiers (``nnunet_id``) which in turn allows for
-    intersection-based filtering of downstream results.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
-
-    nnunet_id: str | list[str] = Field(
-        description="nnUnet model identifier or list of nnUNet model identifiers.",
-        required=True,
-    )
-    output_dir: str = Field(
-        description="Output directory.",
-        required=True,
-    )
-    class_idx: int | list[int | None] | list[
-        list[int] | int | None
-    ] | None = Field(
-        description="Prediction index or indices which are kept after each prediction",
-        default=None,
-    )
-    checkpoint_name: CheckpointName | list[CheckpointName] = Field(
-        description="nnUNet checkpoint name. Options are 'checkpoint_final.pth' and 'checkpoint_best.pth'.",
-        default=CheckpointName.FINAL,
-    )
-    tmp_dir: str = Field(
-        description="Directory for temporary outputs.", default=".tmp"
-    )
-    is_dicom: bool = Field(
-        description="Whether series_paths refers to DICOM series folders.",
-        default=False,
-    )
-    tta: bool = Field(
-        description="Whether to apply test-time augmentation (use_mirroring)",
-        default=False,
-    )
-    use_folds: list[Folds] = Field(
-        description="Which folds should be used", default_factory=lambda: [0]
-    )
-    proba_threshold: float | list[float | None] | None = Field(
-        description="(List of) probability threshold(s) for model output.",
-        default=None,
-    )
-    min_confidence: float | list[float | None] | None = Field(
-        description="(List of) minimum confidence(s) for model output.",
-        default=None,
-    )
-    min_intersection: float | None = Field(
-        description="Minimum intersection over the union to keep a candidate.",
-        default=0.1,
-    )
-    crop_padding: tuple[int, int, int] | None = Field(
-        description="Padding to be added to the cropped region.",
-        default=(10, 10, 10),
-    )
-    cascade_mode: CascadeMode | list[CascadeMode] = Field(
-        description="Whether to crop inputs to consecutive bounding boxes "
-        "or to intersect consecutive outputs.",
-        default=CascadeMode.INTERSECT,
-    )
-    save_proba_map: bool = Field(
-        description="Saves the probability map", default=False
-    )
-    save_nifti_inputs: bool = Field(
-        description="Saves the Nifti inputs in the output folder if input is DICOM",
-        default=False,
-    )
-    save_rt_struct_output: bool = Field(
-        description="Saves the output as an RT struct file", default=False
-    )
-    suffix: str | None = Field(
-        description="Suffix for predictions", default=None
-    )
-
-    def __internal_update_field(self, field: str, value: Any):
-        is_set = False
-        if field in self.__pydantic_fields_set__:
-            is_set = True
-        self.__setattr__(field, value)
-        if is_set is True:
-            self.__pydantic_fields_set__.remove(field)
-
-    def model_post_init(self, context):
-        if self.save_proba_map and all(
-            [x is None for x in self.proba_threshold]
-        ):
-            raise ValueError(
-                "proba_threshold must be not-None if save_proba_map is True"
-            )
-        if isinstance(self.checkpoint_name, list) is False:
-            self.checkpoint_name = [self.checkpoint_name]
-        self.__internal_update_field(
-            "checkpoint_name", [mode.value for mode in self.checkpoint_name]
-        )
-        if isinstance(self.cascade_mode, list) is False:
-            self.cascade_mode = [self.cascade_mode]
-        self.__internal_update_field(
-            "cascade_mode", [mode.value for mode in self.cascade_mode]
-        )
-
-
-class InferenceRequest(InferenceRequestBase):
-    study_path: str = Field(
-        description="Path to study folder or list of paths to studies."
-    )
-    series_folders: list[str] | list[list[str]] = Field(
-        description="Series folder names or list of series folder names (relative to study_path).",
-        default=None,
-    )
-    crop_from: str | None = Field(
-        description="Crops input to the bounding box of this mask.",
-        default=None,
-    )
-    intersect_with: str | None = Field(
-        description="Intersects output with this mask and if relative \
-            intersection < min_intersection the object is deleted",
-        default=None,
-    )
-
-
-class InferenceRequestFile(InferenceRequestBase):
-    study_path: str | None = Field(
-        description="Path to study folder or list of paths to studies.",
-        default=None,
-    )
-    series_folders: list[str] | list[list[str]] | None = Field(
-        description="Series folder names or list of series folder names (relative to study_path).",
-        default=None,
-    )
-
-
-def to_closest_canonical_sitk(
-    img: sitk.Image | list[sitk.Image],
-) -> sitk.Image | list[sitk.Image]:
-    if isinstance(img, list):
-        return [to_closest_canonical_sitk(i) for i in img]
-    direction = img.GetDirection()
-    direction_matrix = np.array(direction).reshape(3, 3)
-    flip_axes = [
-        i
-        for i in range(3)
-        if np.dot(direction_matrix[:, i], np.eye(3)[:, i]) < 0
-    ]
-
-    canonical_img = img
-    for axis in flip_axes:
-        canonical_img = sitk.Flip(
-            canonical_img, [axis == i for i in range(3)], False
-        )
-
-    canonical_img.SetDirection(tuple(np.eye(3).flatten()))
-    return canonical_img
-
-
-def from_closest_canonical_sitk(
-    canonical_img: sitk.Image | list[sitk.Image],
-    original_img: sitk.Image | list[sitk.Image],
-) -> sitk.Image | list[sitk.Image]:
-    if isinstance(canonical_img, list):
-        return [
-            from_closest_canonical_sitk(i, o)
-            for i, o in zip(canonical_img, original_img)
-        ]
-    original_direction = np.array(original_img[0].GetDirection()).reshape(3, 3)
-    canonical_direction = np.eye(3)
-
-    flip_axes = [
-        i
-        for i in range(3)
-        if np.dot(original_direction[:, i], canonical_direction[:, i]) < 0
-    ]
-
-    restored_img = canonical_img
-    for axis in flip_axes:
-        restored_img = sitk.Flip(
-            restored_img, [axis == i for i in range(3)], False
-        )
-
-    restored_img.SetDirection(tuple(original_direction.flatten()))
-    return restored_img
 
 
 def convert_predicted_logits_to_segmentation_with_correct_shape(
@@ -354,7 +147,7 @@ def predict_from_data_iterator_local(
             if isinstance(class_idx, int):
                 class_idx = [class_idx]
             used_labels = [0, *class_idx]
-            correspondence_dict = {i: l for i, l in enumerate(used_labels)}
+            correspondence_dict = {i: lab for i, lab in enumerate(used_labels)}
             prediction = prediction[[0, *class_idx]]
             if predictor.label_manager._has_regions:
                 new_regions = [
@@ -442,31 +235,6 @@ def filter_labels(
     return output
 
 
-def get_gpu_memory() -> list[int]:
-    """
-    Utility to retrieve value for free GPU memory.
-
-    Returns:
-        list[int]: list of available GPU memory (each one corresponds to a GPU
-            index).
-    """
-    command = "nvidia-smi --query-gpu=memory.free --format=csv"
-    try:
-        memory_free_info = (
-            sp.check_output(command.split())
-            .decode("ascii")
-            .split("\n")[:-1][1:]
-        )
-        memory_free_values = [
-            int(x.split()[0]) for i, x in enumerate(memory_free_info)
-        ]
-        return memory_free_values
-    except (sp.CalledProcessError, FileNotFoundError) as e:
-        raise RuntimeError(
-            "nvidia-smi is not available or failed to run"
-        ) from e
-
-
 def get_series_paths(
     study_path: str,
     series_folders: list[str] | list[list[str]] | None,
@@ -518,34 +286,6 @@ def get_series_paths(
             )
 
     return series_paths, SUCCESS_STATUS, None
-
-
-def wait_for_gpu(min_mem: int, timeout_s: int = 120) -> int:
-    """
-    Waits for a GPU with at least ``min_mem`` free memory to be free.
-
-    Args:
-        min_mem (int): minimum amount of memory.
-
-    Returns:
-        int: GPU ID corresponding to freest GPU.
-    """
-    start = time.time()
-    while True:
-        gpu_memory = get_gpu_memory()
-        if len(gpu_memory) == 0:
-            raise RuntimeError("No GPUs detected")
-        max_gpu_memory = max(gpu_memory)
-        device_id = [
-            i for i in range(len(gpu_memory)) if gpu_memory[i] == max_gpu_memory
-        ][0]
-        if max_gpu_memory > min_mem:
-            return device_id
-        if time.time() - start > timeout_s:
-            raise TimeoutError(
-                f"Timeout waiting for a GPU with at least {min_mem} MiB free. Max available: {max_gpu_memory} MiB"
-            )
-        time.sleep(0.5)
 
 
 def get_default_params(default_args: dict | list[dict]) -> dict:
@@ -721,77 +461,6 @@ def predict(
     return output_paths
 
 
-def get_crop(
-    image: str | sitk.Image,
-    target_image: sitk.Image | None = None,
-    crop_padding: tuple[int, int, int] | None = (10, 10, 10),
-    min_size: tuple[int, int, int] | None = None,
-) -> tuple[int, int, int, int, int, int]:
-    """
-    Retrieves the bounding box of a label in an image.
-
-    Args:
-        image (str | sitk.Image): input image.
-        target_image (sitk.Image | None, optional): target image. Defaults to None.
-        crop_padding (tuple[int, int, int] | None, optional): padding to be added to
-            the cropped region. Defaults to None.
-        min_size (tuple[int, int, int] | None, optional): minimum size of the cropped
-            region. Defaults to None.
-
-    Returns:
-        tuple[int, int, int, int, int, int]: bounding box of the label.
-    """
-    if isinstance(image, str):
-        image = sitk.ReadImage(image)
-    if target_image is not None:
-        image = resample_image_to_target(
-            image, target=target_image, is_mask=True
-        )
-    target_image_size = image.GetSize()
-    labelimfilter = sitk.LabelShapeStatisticsImageFilter()
-    labelimfilter.Execute(image)
-    bounding_box = labelimfilter.GetBoundingBox(1)
-    start, size = bounding_box[:3], bounding_box[3:]
-
-    if crop_padding is not None:
-        start = tuple([max(start[i] - crop_padding[i], 0) for i in range(3)])
-        size = tuple(
-            [
-                min(
-                    int(size[i] + crop_padding[i] * 2),
-                    int(target_image_size[i] - start[i]),
-                )
-                for i in range(3)
-            ]
-        )
-    if min_size is not None:
-        for i in range(3):
-            if size[i] < min_size[i]:
-                new_start = max(start[i] - (min_size[i] - size[i]) // 2, 0)
-                start[i] = new_start
-                size[i] = min_size[i]
-
-    bounding_box = [
-        start[0],
-        start[1],
-        start[2],
-        start[0] + size[0],
-        start[1] + size[1],
-        start[2] + size[2],
-    ]
-    output_padding = [
-        bounding_box[0],
-        bounding_box[1],
-        bounding_box[2],
-        target_image_size[0] - bounding_box[3],
-        target_image_size[1] - bounding_box[4],
-        target_image_size[2] - bounding_box[5],
-    ]
-    output_padding = list(map(int, output_padding))
-
-    return bounding_box, output_padding
-
-
 def load_series(series_paths: list[list[str]], is_dicom: bool = False):
     unique_series_paths = []
     for series_path in series_paths:
@@ -949,7 +618,7 @@ def single_model_inference(
     class_idx: int | list[int] | None = None,
     checkpoint_name: str = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
-    use_folds: Folds = (0,),
+    use_folds: list[int] = [0],
     proba_threshold: float | None = None,
     min_confidence: float | None = None,
     intersect_with: str | sitk.Image | None = None,
@@ -974,8 +643,8 @@ def single_model_inference(
             Defaults to "checkpoint_best.pth".
         tmp_dir (str, optional): directory where temporary outputs are stored.
             Defaults to ".tmp".
-        use_folds (Folds, optional): which folds from the nnUNet model will be
-            used. Defaults to (0,).
+        use_folds (list[int], optional): which folds from the nnUNet model will be
+            used. Defaults to [0].
         proba_threshold (float, optional): probability threshold to consider a
             pixel positive positive. Defaults to 0.1.
         min_confidence (float | None, optional): minimum confidence level for

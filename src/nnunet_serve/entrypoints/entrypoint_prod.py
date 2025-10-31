@@ -3,7 +3,8 @@ import os
 import time
 
 import requests
-from nnunet_serve.entrypoints.entrypoint import main
+
+from nnunet_serve.entrypoints.entrypoint import main_with_args
 from nnunet_serve.utils import make_parser
 
 
@@ -24,14 +25,14 @@ class Timer:
         self.count += 1
 
 
-def main_args(args):
+def main_with_args(args):
     timer = Timer()
     # easier to adapt to docker
     if "SERIES_PATHS" in os.environ:
         args.series_paths = os.environ["SERIES_PATHS"].split(" ")
 
     args.folds = [int(f) for f in args.folds]
-    main(args)
+    main_with_args(args)
 
     timer.print_time()
 
@@ -82,7 +83,7 @@ if __name__ == "__main__":
 
     if args.debug is not True:
         try:
-            log_out = main_args(args)
+            log_out = main_with_args(args)
             status = args.success_message
             err = ""
         except KeyboardInterrupt:
@@ -95,7 +96,7 @@ if __name__ == "__main__":
             err = repr(e)
             print(e)
     else:
-        log_out = main_args(args)
+        log_out = main_with_args(args)
         status = args.success_message
         err = ""
 

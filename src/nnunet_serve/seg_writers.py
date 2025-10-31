@@ -3,21 +3,20 @@ Utilities for writing segmentations.
 """
 
 import logging
-import random
 import os
+import random
 import re
+from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from difflib import SequenceMatcher
-
+from pathlib import Path
 
 import highdicom as hd
 import numpy as np
 import pydicom
 import pydicom_seg
 import SimpleITK as sitk
-from copy import deepcopy
-from pydicom import DataElement, Sequence, Dataset
+from pydicom import DataElement
 from pydicom.sr.codedict import Code, codes
 from pydicom_seg.template import rgb_to_cielab
 from tqdm import tqdm
@@ -26,11 +25,11 @@ from nnunet_serve.coding import (
     CATEGORY_MAPPING,
     CODING_SCHEME_INFORMATION,
     CODING_SCHEME_INFORMATION_VR,
-    NATURAL_LANGUAGE_TO_CODE,
     LATERALITY_CODING,
+    NATURAL_LANGUAGE_TO_CODE,
 )
-from nnunet_serve.str_processing import to_camel_case, get_laterality
 from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.str_processing import get_laterality, to_camel_case
 
 logger = get_logger(__name__)
 
@@ -119,7 +118,7 @@ def get_segment_type_code(segment: dict | str, i: int) -> Code:
         name = to_camel_case(process_name(segment_dict["name"]))
         if segment_dict["scheme"] not in ["SCT", "EUCAIM"]:
             raise ValueError(
-                f"Only SCT and EUCAIM schemes are supported for automatic retrieval"
+                "Only SCT and EUCAIM schemes are supported for automatic retrieval"
             )
         if name not in NATURAL_LANGUAGE_TO_CODE[segment_dict["scheme"]]:
             closest_matches = []
