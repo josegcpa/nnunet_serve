@@ -29,20 +29,18 @@ _rate_limit_store: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
 
 
-async def expire_cache():
-    CACHE.expire()
-
-
 async def expire_cache_runner():
     while True:
-        asyncio.create_task(expire_cache())
-        await asyncio.sleep(30)
+        N = len(CACHE.expire())
+        logger.info("Clearing model cache, expired %d items", N)
+        await asyncio.sleep(60)
 
 
 @asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
-    expire_cache_runner()
+    task = asyncio.create_task(expire_cache_runner())
     yield
+    task.cancel()
 
 
 def create_app() -> fastapi.FastAPI:

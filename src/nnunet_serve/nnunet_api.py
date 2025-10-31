@@ -7,7 +7,6 @@ import shutil
 import sqlite3
 import time
 import uuid
-import asyncio
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
