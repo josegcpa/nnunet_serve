@@ -24,6 +24,7 @@ dependencies = [
     "owlready2>=0.48",
     "torch>=2.9.0",
     "python-multipart>=0.0.20",
+    "cachetools>=6.2.1",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -36,3 +37,6 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 pydicom-seg = { git = "https://github.com/josegcpa/pydicom-seg", rev = "75a1b025f2a3297e1704ae135371bfd5ce631935" }
 totalsegmentator = { git = "https://github.com/wasserth/TotalSegmentator" }
+
+[project.scripts]
+nnunet-predict = "nnunet_serve.entrypoints.entrypoint:main"
