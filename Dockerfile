@@ -8,7 +8,6 @@ ENV UVICORN_PORT=50422
 ENV NNUNET_OUTPUT_DIR=/data/nnunet
 
 # install internal dependencies
-COPY docker-installations.sh docker-installations.sh
 RUN pip install uv pip && \
     uv pip install --system setuptools wheel && \
     uv pip install --system -r requirements.txt && \
@@ -45,4 +44,4 @@ RUN mkdir -p $NNUNET_OUTPUT_DIR
 # downloads total segmentator models if necessary 
 RUN uv run nnunet-validate-metadata
 
-ENTRYPOINT ["uv", "run", "uvicorn", "nnunet_serve.nnunet_serve:create_app"]
+ENTRYPOINT ["uv", "run"]
