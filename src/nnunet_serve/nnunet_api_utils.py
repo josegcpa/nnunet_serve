@@ -33,6 +33,7 @@ from nnunet_serve.utils import (
     intersect,
     read_dicom_as_sitk,
     remove_small_objects,
+    wait_for_gpu,
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
 from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
@@ -345,8 +346,9 @@ def load_predictor(
     nnunet_path: str,
     checkpoint_name: str,
     mirroring: bool,
-    device_id: int,
+    device_id: int | None,
     use_folds: bool,
+    min_mem: int | None = None,
 ) -> nnUNetPredictor:
     """
     Loads a nnUNetPredictor instance from a trained model folder.
@@ -354,17 +356,23 @@ def load_predictor(
     operations.
 
     Args:
+        nnunet_path (str): Path to the nnUNet model folder.
+        checkpoint_name (str): Name of the checkpoint to use.
         mirroring (bool): Whether to use mirroring during inference.
         device_id (int): GPU identifier.
-        nnunet_path (str): Path to the nnUNet model folder.
         use_folds (bool): Whether to use folds during inference.
-        checkpoint_name (str): Name of the checkpoint to use.
+        min_mem (int | None): Minimum amount of free memory required to use the
+            GPU. Defaults to None.
 
     Returns:
         nnUNetPredictor: A loaded nnUNetPredictor instance.
     """
     if isinstance(use_folds, int):
         use_folds = [use_folds]
+    if device_id is None:
+        if min_mem is None:
+            raise ValueError("min_mem must be defined when device_id is None")
+        device_id = wait_for_gpu(min_mem)
     args_hash = hash(
         tuple(
             [
@@ -406,7 +414,7 @@ def predict(
     series_paths: list,
     metadata: str | None,
     mirroring: bool,
-    device_id: int,
+    device_id: int | None,
     params: dict,
     nnunet_path: str | list[str],
     flip_xy: bool | list[bool] = False,
@@ -421,7 +429,7 @@ def predict(
             (pointing towards a DCMQI metadata file) or a list of metadata
             key-value pairs (please see ``SegWriter`` for details).
         mirroring (bool): whether to use mirroring during inference.
-        device_id (int): GPU identifier.
+        device_id (int | None): GPU identifier.
         params (dict): parameters which will be used in wraper.
         nnunet_path (str | list[str]): path or paths to nnUNet model.
         flip_xy (bool | list[bool]): whether to flip the x and y axes during
@@ -470,6 +478,7 @@ def predict(
         "series_folders",
     ]
 
+    min_mem = params.get("min_mem", None)
     params = {k: params[k] for k in params if k not in delete_params}
     inference_params = {
         k: params[k] for k in params if k in inference_param_names
@@ -500,6 +509,7 @@ def predict(
             flip_xy=flip_xy,
             mirroring=mirroring,
             device_id=device_id,
+            min_mem=min_mem,
             **inference_params,
         )
     except torch.cuda.OutOfMemoryError as e:
@@ -704,7 +714,7 @@ def single_model_inference(
     class_idx: int | list[int] | None = None,
     checkpoint_name: str = "checkpoint_best.pth",
     mirroring: bool = False,
-    device_id: int = 0,
+    device_id: int | None = None,
     tmp_dir: str = ".tmp",
     use_folds: list[int] = [0],
     proba_threshold: float | None = None,
@@ -716,6 +726,7 @@ def single_model_inference(
     crop_padding: tuple[int, int, int] | None = None,
     min_intersection: float = 0.1,
     flip_xy: bool = False,
+    min_mem: int | None = None,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
     """
     Runs the inference for a single model.
@@ -730,7 +741,8 @@ def single_model_inference(
             Defaults to "checkpoint_best.pth".
         mirroring (bool, optional): whether to use mirroring during inference.
             Defaults to False.
-        device_id (int, optional): GPU identifier. Defaults to 0.
+        device_id (int | None, optional): GPU identifier. Defaults to None (gets
+            automatically assigned to the GPU with the most free memory).
         tmp_dir (str, optional): directory where temporary outputs are stored.
             Defaults to ".tmp".
         use_folds (list[int], optional): which folds from the nnUNet model will be
@@ -756,6 +768,8 @@ def single_model_inference(
             to None.
         flip_xy (bool, optional): whether to flip the x and y axes of the input.
             TotalSegmentator does this for some reason. Defaults to False.
+        min_mem (int | None, optional): minimum amount of free memory required to
+            use the GPU. Only used when ``device_id`` is None. Defaults to None.
 
     Raises:
         ValueError: if there is a mismatch between the number of series and
@@ -773,6 +787,7 @@ def single_model_inference(
         mirroring=mirroring,
         device_id=device_id,
         use_folds=use_folds,
+        min_mem=min_mem,
     )
     input_spacing = volumes[0].GetSpacing()
     original_size = volumes[0].GetSize()
@@ -912,7 +927,7 @@ def multi_model_inference(
     output_dir: str,
     class_idx: int | list[int] | list[list[int]] | None = None,
     mirroring: bool = False,
-    device_id: int = 0,
+    device_id: int | None = None,
     checkpoint_name: str | list[str] = "checkpoint_best.pth",
     tmp_dir: str = ".tmp",
     is_dicom: bool = False,
@@ -925,6 +940,7 @@ def multi_model_inference(
     crop_padding: tuple[int, int, int] | None = None,
     cascade_mode: str | list[str] = "intersect",
     flip_xy: bool = False,
+    min_mem: int | None = None,
 ):
     """
     Prediction wraper for multiple models. Exports the outputs.
@@ -940,7 +956,8 @@ def multi_model_inference(
             Defaults to "checkpoint_best.pth".
         mirroring (bool, optional): whether to use mirroring during inference.
             Defaults to False.
-        device_id (int, optional): GPU identifier. Defaults to 0.
+        device_id (int | None, optional): GPU identifier. Defaults to None (gets
+            automatically assigned to the GPU with the most free memory).
         tmp_dir (str, optional): temporary directory. Defaults to ".tmp".
         is_dicom (bool, optional): whether the input/output is DICOM. Defaults
             to False.
@@ -962,6 +979,8 @@ def multi_model_inference(
             bounding boxes or to intersect consecutive outputs. Defaults to "intersect".
         flip_xy (bool, optional): whether to flip the x and y axes of the input.
             TotalSegmentator does this for some reason. Defaults to False.
+        min_mem (int | None, optional): minimum amount of free memory required to
+            use the GPU. Only used when ``device_id`` is None. Defaults to None.
     """
 
     def coherce_to_list(obj: Any, n: int) -> list[Any] | tuple[Any]:
@@ -1044,6 +1063,7 @@ def multi_model_inference(
                 crop_class_idx=crop_class_idx,
                 crop_padding=crop_padding,
                 flip_xy=flip_xy[i],
+                min_mem=min_mem,
             )
             all_predictions.append(mask)
             all_proba_maps.append(proba_map)
@@ -1081,6 +1101,7 @@ def multi_model_inference(
             crop_from=crop_from,
             crop_padding=crop_padding,
             flip_xy=flip_xy,
+            min_mem=min_mem,
         )
         all_predictions = [mask]
         all_proba_maps = [proba_map]

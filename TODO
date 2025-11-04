@@ -1,2 +1,3 @@
 [x] Include cascaded prediction with other models
-[] Make output relative
+[x] Include RT struct into SegWriter
+[ ] More extensive testing

@@ -566,11 +566,11 @@ class nnUNetAPI:
             )
 
         try:
-            device_id = wait_for_gpu(min_mem)
+            wait_for_gpu(min_mem)
         except (RuntimeError, TimeoutError) as e:
             error_str = str(e)
             if self.app is None:
-                raise ValueError(error_str)
+                raise RuntimeError(error_str)
             return JSONResponse(
                 content={
                     "time_elapsed": None,
@@ -595,7 +595,7 @@ class nnUNetAPI:
                 series_paths=series_paths,
                 metadata=metadata,
                 mirroring=mirroring,
-                device_id=device_id,
+                device_id=None,
                 params=params,
                 nnunet_path=nnunet_path,
                 flip_xy=is_totalseg,
@@ -609,7 +609,7 @@ class nnUNetAPI:
                     series_paths=series_paths,
                     metadata=metadata,
                     mirroring=mirroring,
-                    device_id=device_id,
+                    device_id=None,
                     params=params,
                     nnunet_path=nnunet_path,
                     flip_xy=is_totalseg,

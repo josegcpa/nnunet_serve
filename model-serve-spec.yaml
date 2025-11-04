@@ -2,14 +2,121 @@
 model_folder: /usr/backups/models/nnunet/
 load_timeout_min: 60
 models:
-  # totalsegmentator models can be specified as follows:
+  - id: prostate_whole_gland
+    rel_path: prostate_whole_gland_model
+    name: "Prostate whole gland segmentation"
+    # file containing metadata for DICOM-seg output
+    aliases: [prostate]
+    metadata:
+      path: metadata/whole-prostate.json
+    # minimum amount of GPU memory to trigger running
+    min_mem: 4000
+    # defines default params (overriden by posts)
+    default_args:
+      series_folders: ["inputs/seriesT2"]
+      use_folds: [0, 1, 2, 3, 4]
+      tta: false
+      checkpoint_name: "checkpoint_best.pth"
+  - id: prostate_zone
+    rel_path: prostate_zone_model
+    name: "Prostate zone segmentation model"
+    aliases: [prostate_zones]
+    metadata: 
+      path: metadata/prostate-zones.json
+    min_mem: 4000
+    default_args:
+      series_folders: ["inputs/seriesT2"]
+      use_folds: [0, 1, 2, 3, 4]
+      tta: false
+      checkpoint_name: "checkpoint_best.pth"
+  - id: prostate_aggressive_lesion
+    rel_path: prostate_aggressive_lesion_model
+    name: "Prostate aggressive lesion detection model"
+    aliases: [aggressive_lesion]
+    metadata:
+      path: metadata/prostate-aggressive-lesion.json
+    min_mem: 4000
+    default_args:
+      series_folders:
+        ["inputs/seriesT2", "inputs/seriesDWI", "inputs/seriesADC"]
+      use_folds: [0, 1, 2, 3, 4]
+      proba_threshold: 0.1
+      min_confidence: 0.5
+      tta: true
+      save_proba_map: true
+      checkpoint_name: "checkpoint_best.pth"
+      class_idx: 1 # required to save probability maps
+  - id: whole_body_ct
+    rel_path: Dataset300_body_6mm_1559subj
+    name: "Whole body CT segmentation model (from TotalSegmentator)"
+    aliases: [body_ct]
+    metadata:
+      algorithm_name: "TotalSegmentator"
+      algorithm_version: "v1.0"
+      manufacturer: "TotalSegmentator"
+      manufacturer_model_name: "TotalSegmentator"
+      series_description: "Whole body CT segmentation model (from TotalSegmentator)"
+      body_part_examined: "BODY"
+      segment_names: ["EntireBody"]
+    min_mem: 4000
+    default_args:
+      series_folders: ["inputs/seriesCT"]
+      use_folds: [0]
+      checkpoint_name: "checkpoint_final.pth"
+      class_idx: 1
+      proba_threshold: null
+  - id: organ_ct_verbose
+    rel_path: Dataset291_TotalSegmentator_part1_organs_1559subj
+    name: "Organ CT segmentation model (from TotalSegmentator)"
+    is_totalseg: true
+    metadata:
+      algorithm_name: "TotalSegmentator"
+      algorithm_version: "v1.0"
+      manufacturer: "TotalSegmentator"
+      manufacturer_model_name: "TotalSegmentator"
+      series_description: "Organ CT segmentation model (from TotalSegmentator)"
+      body_part_examined: "BODY"
+      segment_names: 
+      - "Spleen"
+      - "Right Kidney"
+      - "Left Kidney"
+      - "Gallbladder"
+      - "Liver"
+      - "Stomach"
+      - "Pancreas"
+      - "Right Adrenal Gland"
+      - "Left AdrenalGland"
+      - "Left UpperLobeOfLung"
+      - "Left LowerLobeOfLung"
+      - "Right UpperLobeOfLung"
+      - "Right LobeOfLung"
+      - "Right LowerLobeOfLung"
+      - "Esophagus"
+      - "Trachea"
+      - "Thyroid"
+      - "SmallIntestine"
+      - "Duodenum"
+      - "Colon"
+      - "Bladder"
+      - "Prostate"
+      - name: "Cyst"
+        label: "Left KidneyCyst"
+        code: "367643001"
+      - name: "Cyst"
+        label: "Right KidneyCyst"
+        code: "367643001"
+    min_mem: 4000
+    default_args:
+      series_folders: ["inputs/seriesCT"]
+      use_folds: [0]
+      checkpoint_name: "checkpoint_final.pth"
+      proba_threshold: null
   - id: total_ct
     totalseg_task: "total_fastest"
+  - id: organ_ct
+    totalseg_task: "organ_ct"
   - id: liver_segments
     totalseg_task: "liver_segments"
-  # other models 
-  # (Note: this model is currently not available by default and this
-  # specification is provided only as an example)
   - id: hcc_arterial
     rel_path: hcc_arterial
     name: "HCC arterial phase segmentation model"
@@ -25,6 +132,6 @@ models:
     min_mem: 4000
     default_args:
       series_folders: ["inputs/seriesCT"]
-      use_folds: [0]
+      use_folds: [0, 1, 2, 3, 4]
       checkpoint_name: "checkpoint_final.pth"
     
