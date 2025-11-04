@@ -36,4 +36,7 @@ RUN mkdir -p /tmp
 RUN mkdir -p /models
 RUN mkdir -p $NNUNET_OUTPUT_DIR
 
+# downloads total segmentator models if necessary 
+RUN uv run nnunet-validate-metadata
+
 ENTRYPOINT ["uv", "run", "uvicorn", "nnunet_serve.nnunet_serve:create_app"]
