@@ -6,7 +6,9 @@
 
 Given that [nnUNet](https://github.com/MIC-DKFZ/nnUNet) is a relatively flexible framework, we have developed a container that allows users to run nnUNet in a container while varying the necessary models. The main features are inferring all necessary parameters from the nnUNet files (spacing, extensions) and working for both DICOM folder and SITK-readable files. If the input is a DICOM, the segmentation is converted into a DICOM-seg file, compatible with PACS systems.
 
-## Installation 
+## Installation
+
+Installation requirements are handled by `uv` (https://github.com/ultralytics/uv). `uv` is a tool for managing Python packages and dependencies.
 
 ### Requirements
 
@@ -128,7 +130,8 @@ A core concept underlies this framework - that of cascading predictions. The out
 - **`--class_idx`**: Index or list of class indices to retain in the final output (default: `all`). 💧
 - **`--suffix`**: Optional suffix appended to output filenames (e.g., `_v1`).
 
-### Logging and status updates for CLI (for `uv run python -m nnunet_serve.entrypoints.entrypoint_prod`)
+
+#### Logging and status updates for CLI (for `uv run python -m nnunet_serve.entrypoints.entrypoint_prod`)
 
 To facilitate integration into production environments, we have added a logging function to `entrypoint_prod.py`. This works by specifying the following CLI arguments:
 
@@ -148,21 +151,71 @@ To facilitate integration into production environments, we have added a logging 
 - `--job_id` - specifies the job ID to be used to post job status
 - `--log_file` - specifies the path to a log file to be created. This file will contain the job ID, the success/failure message, and the output log. If `log_file` already exists, only `status`, `output_error` and `output_log` are updated, while `job_id` is only added to the log if it has not already been specified in the pre-existing `log_file`.
 
-### Notes on using DICOM
+#### Notes on using DICOM
 
 It is necessary to generate metadata templates for the conversion between the segmentation prediction volume and DICOM volumes. To generate these, the `pydicom_seg` developers recommend [this web app](https://qiicr.org/dcmqi/#/seg). It is easy to use and generates reliable metadata templates. Metadata templates should be generated for all segmentation targets to ensure that everything is correctly formatted.
 
-## API
+### Batch inference
+
+The `entrypoint_batch.py` script enables running inference on multiple studies defined in a JSON file.
+
+#### Data JSON format
+
+Create a JSON file (e.g., `data_json.json`) containing a list of dictionaries, each with the keys:
+
+- `study_path`: path to the study directory.
+- `series_folders`: list of series folder lists (matching the cascade format).
+- `output_dir`: directory where outputs for that study will be written.
+
+Example (`data_json.json`):
+
+```json
+[
+    {
+        "study_path": "example",
+        "series_folders": [["dcm"]],
+        "output_dir": "test_output/entrypoint_output_batch"
+    },
+    {
+        "study_path": "example_2",
+        "series_folders": [["dcm"]],
+        "output_dir": "test_output/entrypoint_output_batch_2"
+    }
+]
+```
+
+#### Running batch inference
+
+```bash
+uv run nnunet-predict-batch \
+    --data_json data_json.json \
+    --nnunet_id prostate prostate_zones \
+    --use_folds 0 1 2 3 4 \
+    --tta \
+    --proba_map \
+    --proba_threshold 0.1 \
+    --min_confidence 0.5 \
+    --cascade_mode crop \
+    --save_nifti_inputs
+```
+
+All CLI arguments supported by `nnunet-predict` are available; the script forwards them to each study entry. The `--data_json` argument is mandatory for batch mode.
+
+Refer to `src/nnunet_serve/entrypoints/entrypoint_batch.py` for the full implementation.
+
+
+
+### API
 
 This repository includes a FastAPI server that exposes nnU-Net inference as an HTTP API. The server is implemented in `src/nnunet_serve/nnunet_serve.py` and configured by `model-serve-spec.yaml`.
 
-### Model caching
+#### Model caching
 
 Models are cached using a time-to-live cache system, they survive in memory for 5 minutes (300 seconds). Whenever a model is needed, it is checked if it is already cached. If it is not, it is loaded to the pre-specified cache and returned. The cache is cleaned up periodically (every 60 seconds) to free up space.
 
-### Run the server
+#### Run the server
 
-#### Locally
+##### Locally
 
 ```bash
 # optionally set the port via env var (defaults to 12345)
@@ -181,7 +234,7 @@ uv run uvicorn nnunet_serve.nnunet_serve:create_app \
 
 Ensure your `model-serve-spec.yaml` is present and correctly references your models. GPU and `nvidia-smi` must be available; the server waits for a GPU with enough free memory before running a job.
 
-#### Running as a Docker container
+##### Running as a Docker container
 
 Firstly, users must install [Docker](https://www.docker.com/). **Docker requires `sudo` if not [correctly setup](https://docs.docker.com/engine/install/linux-postinstall/) so be mindful of this!**. Then:
 
@@ -189,7 +242,7 @@ Firstly, users must install [Docker](https://www.docker.com/). **Docker requires
 2. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
 3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`, as well as the output directory if necessary `-v /data/nnunet:/data/nnunet`): `sudo docker run -it -p 50422:50422 --gpus all -v /models:/models -v /data/nnunet:/data/nnunet nnunet_predict`. This will launch the inference server. When specifying the output directory - if the outputs are not supposed to be kept, we recommend using a Docker volume which can be easily deleted. If the server is running internally, it might be interesting to mount a directory in the computer.
 
-### Endpoints
+#### Endpoints
 
 - **`GET /model_info`**
   - Returns the server’s model registry resolved from `model-serve-spec.yaml` and the filesystem.
@@ -217,7 +270,7 @@ Firstly, users must install [Docker](https://www.docker.com/). **Docker requires
 - **`GET /expire`**
   - Expires the TTL cache. Returns `{ "status": "ok" , "message": "Expired {n_items} items"}` when expired, otherwise `{ "status": "error" , "message": "{error message}"}`.
 
-### Request body schema (InferenceRequest)
+#### Request body schema (InferenceRequest)
 
 Required fields:
 - **`nnunet_id`**: string or list of strings. Must match a model `id`, `name`, or any alias from `model-serve-spec.yaml`.
@@ -252,7 +305,7 @@ Notes:
 - For multi-model requests (`nnunet_id` is a list), `series_folders` must be a list of lists of the same length, and list-valued parameters (`class_idx`, `proba_threshold`, etc.) can be supplied per model. Defaults are merged accordingly.
 - When `is_dicom=true`, each model must have `metadata` defined in `model-serve-spec.yaml` (either `path` to a DCMQI JSON template or an inline metadata object). Otherwise inference will fail.
 
-### Response schema (POST /infer)
+#### Response schema (POST /infer)
 
 On success (HTTP 200):
 - **`time_elapsed`**: seconds to complete the request.
@@ -276,7 +329,7 @@ On failure:
 - **HTTP 400** if `series_folders` is missing or inconsistent with the number of models.
 - **HTTP 500** for runtime exceptions during inference; payload includes `status="failed"` and `error`.
 
-### Examples
+#### Examples
 
 - **Discover models and schema**
 
@@ -319,7 +372,7 @@ curl -X POST http://localhost:12345/infer \
   }'
 ```
 
-### Operational notes
+## Operational notes
 
 - **Strict GPU requirement:** The server requires an NVIDIA GPU and `nvidia-smi`. It waits for a GPU with at least the model’s `min_mem` free memory (`wait_for_gpu()`), using the maximum `min_mem` across models for multi-model requests. CPU-only systems are not supported.
 - **CORS:** No CORS middleware is configured by default. If you expose the API to browsers, configure CORS as appropriate for your deployment.
