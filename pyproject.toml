@@ -1,7 +1,7 @@
 [project]
 name = "nnunet_serve"
 version = "0.1.0"
-description = "Tools to distribute and deploy nnUNet."
+description = "One-size-fits-all to perform cascading inferences using nnU-Net and TotalSegmentator."
 authors = [
     {name = "José Guilherme de Almeida", email = "jose.almeida@research.fchampalimaud.org"},
 ]
