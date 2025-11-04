@@ -240,41 +240,48 @@ Firstly, users must install [Docker](https://www.docker.com/). **Docker requires
 
 1. Adapt the [`model-serve-spec.yaml`](model-serve-spec.yaml) with your favourite models; this is the blueprint for `model-serve-spec-docker.yaml` (same models but different model directory)
 2. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
-3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`, as well as the output directory if necessary `-v /data/nnunet:/data/nnunet`): `sudo docker run -it -p 50422:50422 --gpus all -v /models:/models -v /data/nnunet:/data/nnunet nnunet_predict`. This will launch the inference server. When specifying the output directory - if the outputs are not supposed to be kept, we recommend using a Docker volume which can be easily deleted. If the server is running internally, it might be interesting to mount a directory in the computer.
+3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`, as well as the output directory if necessary `-v /data/nnunet:/data/nnunet`): `docker run -it -p 50422:50422 --gpus all -v /models:/models -v /data/nnunet:/data/nnunet nnunet_predict uvicorn nnunet_serve.nnunet_serve:create_app`. This will launch the inference server. When specifying the output directory - if the outputs are not supposed to be kept, we recommend using a Docker volume which can be easily deleted. If the server is running internally, it might be interesting to mount a directory in the computer where outputs are stored.
 
 #### Endpoints
 
 - **`GET /model_info`**
   - Returns the server’s model registry resolved from `model-serve-spec.yaml` and the filesystem.
-  - Each entry is keyed by `id` and includes, when found, `path`, `rel_path`, `name`, `metadata`, `min_mem`, `default_args`, `n_classes`, `model_information` (parsed from `dataset.json`), and flags like `is_totalseg`.
+  - Response model: `dict[str, Any]` (JSON object with model entries).
 
 - **`GET /request-params`**
-  - Returns the JSON schema of the request body for `/infer` (Pydantic model `InferenceRequest`). Use this to dynamically build clients and as documentation.
+  - Returns the JSON schema of the request body for `/infer` (Pydantic model `InferenceRequest`).
+  - Response model: `dict[str, Any]`.
 
 - **`POST /infer`**
   - Runs inference for one or multiple models.
-  - Response includes execution metadata and exported file paths (see below). On errors, a JSON with `status="failed"` and `error` is returned with HTTP 400/500.
+  - Response model: `InferenceResponse` (see response schema below).
 
 - **`POST /infer_file`**
-  - Accepts a file (or archive) upload, stores it, builds an `InferenceRequest`, and delegates to `/infer`. Returns a job ID and inference result. The fields that should be sent are identical to those of the `/infer` method with the exception of the `study_path` field, which is not required.
+  - Accepts an archive upload (zip, tar, etc.), stores it, builds an `InferenceRequest`, and delegates to `/infer`. Keep in mind that while the `nnunet_serve` API does not require `study_path` for `/infer_file`, it still requires `series_folders`. This is to eliminate any ambiguity when selecting the relevant series for predictions.
+  - Returns a job ID and inference result.
+  - Response model: `dict[str, Any]` (includes job_id and same fields as `/infer`).
 
 - **`GET /download/{job_id}`**
-  - Serves the zip file containing the inference outputs for the given job ID. Returns 404 if the job ID is unknown or the file has been cleaned up.
+  - Serves the zip file containing the inference outputs for the given job ID.
+  - Response class: `FileResponse` (application/zip).
 
 - **`GET /healthz`**
-  - Simple health check endpoint returning `{"status": "ok"}`.
+  - Simple health check endpoint.
+  - Response model: `dict[str, Any]` with `{"status": "ok"}`.
 
 - **`GET /readyz`**
-  - Readiness probe indicating whether models are loaded and a GPU is available (if required). Returns `{ "status": "ok" }` when ready, otherwise `{ "status": "starting" }` with additional fields.
+  - Readiness probe indicating whether models are loaded and a GPU is available.
+  - Response model: `dict[str, Any]` with status and additional fields.
 
 - **`GET /expire`**
-  - Expires the TTL cache. Returns `{ "status": "ok" , "message": "Expired {n_items} items"}` when expired, otherwise `{ "status": "error" , "message": "{error message}"}`.
+  - Expires the TTL cache.
+  - Response model: `dict[str, Any]` with status and message.
 
 #### Request body schema (InferenceRequest)
 
 Required fields:
 - **`nnunet_id`**: string or list of strings. Must match a model `id`, `name`, or any alias from `model-serve-spec.yaml`.
-- **`study_path`**: string path to the study root directory.
+- **`study_path`**: string path to the study root directory (only for `/infer` endpoint; not necessary for `/infer_file`).
 - **`series_folders`**:
   - Single model: list of relative series folder names under `study_path`.
   - Multiple models: list of lists, one per model, each a list of relative series folder names under `study_path`.
@@ -328,6 +335,17 @@ On failure:
 - **HTTP 400** for invalid `nnunet_id` or invalid `series_folders` shape; payload includes `status="failed"` and `error` message.
 - **HTTP 400** if `series_folders` is missing or inconsistent with the number of models.
 - **HTTP 500** for runtime exceptions during inference; payload includes `status="failed"` and `error`.
+
+#### Response schema (POST /infer_file)
+
+On success (HTTP 200):
+- **`job_id`**: unique identifier for the inference job.
+- All fields from the `/infer` response schema are included (`time_elapsed`, `gpu`, `nnunet_path`, `metadata`, `request`, `status`, exported file paths, etc.).
+- The `request` field reflects the original request payload (without `study_path` as it is inferred from the uploaded file).
+
+On failure (HTTP 400/500):
+- Same error structure as `/infer` with an additional `job_id` field when applicable.
+- Payload includes `status="failed"` and an `error` message describing the issue.
 
 #### Examples
 
