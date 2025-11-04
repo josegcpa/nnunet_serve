@@ -1,8 +1,17 @@
-# Docker container-ready nnUNet wrapper for SITK-readable and DICOM files
+# A one-size-fits-all solution to run nnU-Net models with support for TotalSegmentator
+
+[![DOI](https://zenodo.org/badge/671509919.svg)](https://doi.org/10.5281/zenodo.17522202)
 
 ## Context
 
 Given that [nnUNet](https://github.com/MIC-DKFZ/nnUNet) is a relatively flexible framework, we have developed a container that allows users to run nnUNet in a container while varying the necessary models. The main features are inferring all necessary parameters from the nnUNet files (spacing, extensions) and working for both DICOM folder and SITK-readable files. If the input is a DICOM, the segmentation is converted into a DICOM-seg file, compatible with PACS systems.
+
+## Installation 
+
+### Requirements
+
+* `uv` - using `uv` makes this all very easy as it manages Python packages. The installation is handled lazily (i.e. at runtime)
+* CUDA-compatible GPU cards
 
 ## Usage
 
@@ -27,12 +36,11 @@ Model configuration makes use of `model-serve-spec.yaml`. This is a relatively s
 
 A considerable objective of this framework was its deployment as a standalone tool (for `bash`). To use it:
 
-1. Install the necessary packages using an appropriate Python environment (i.e. `pip install -r requirements.txt`). We have tested this using Python `v3.11`
-2. Run `uv run nnunet_serve.entrypoints.entrypoint.py --help` to see the available options
-3. Segment away!
+1. Run `uv run nnunet-predict --help` to see the available options
+2. Segment away!
 
 ```bash
-uv run nnunet_serve.entrypoints.entrypoint.py --help
+uv run nnunet-predict --help
 ```
 
 ```
@@ -48,7 +56,7 @@ options:
                         Checkpoint name for nnUNet
   --output_dir, -o OUTPUT_DIR
                         Path to output directory
-  --folds, -f FOLDS [FOLDS ...]
+  --use_folds, -f FOLDS [FOLDS ...]
                         Sets which folds should be used with nnUNet
   --tta, -t             Uses test-time augmentation during prediction
   --tmp_dir TMP_DIR     Temporary directory
@@ -82,7 +90,7 @@ Example:
 The example below outlines the path to a given study (`--study_path`) and to a given series folder (`--series_folders`). The `--nnunet_id` flag outlines the models to be used, in this case, `prostate` and `prostate_zones` (the two models are applied sequentially, and the output from the first model is used to crop the input to the second model as noted in `--cascade_mode`). The `--output_dir` flag outlines the path to the output directory. The `--is_dicom` flag outlines that the input is a DICOM file. The `--proba_threshold` flag outlines the probability threshold for the probability map. The `--cascade_mode` flag outlines the cascade mode (`crop` or `intersect`). The `--save_nifti_inputs` flag outlines that the Nifti inputs should be saved to the output directory. The `--crop_padding` flag outlines the padding to be added to the cropped region.
 
 ```bash
-uv run nnunet_serve.entrypoints.entrypoint \
+uv run nnunet-predict \
   --study_path path/to/study \
   --series_folders relative/path/to/series \
   --nnunet_id prostate prostate_zones \
@@ -120,7 +128,7 @@ A core concept underlies this framework - that of cascading predictions. The out
 - **`--class_idx`**: Index or list of class indices to retain in the final output (default: `all`). 💧
 - **`--suffix`**: Optional suffix appended to output filenames (e.g., `_v1`).
 
-### Logging and status updates for CLI (for `uv run nnunet_serve.entrypoints.entrypoint_prod`)
+### Logging and status updates for CLI (for `uv run python -m nnunet_serve.entrypoints.entrypoint_prod`)
 
 To facilitate integration into production environments, we have added a logging function to `entrypoint_prod.py`. This works by specifying the following CLI arguments:
 
@@ -148,15 +156,19 @@ It is necessary to generate metadata templates for the conversion between the se
 
 This repository includes a FastAPI server that exposes nnU-Net inference as an HTTP API. The server is implemented in `src/nnunet_serve/nnunet_serve.py` and configured by `model-serve-spec.yaml`.
 
+### Model caching
+
+Models are cached using a time-to-live cache system, they survive in memory for 5 minutes (300 seconds). Whenever a model is needed, it is checked if it is already cached. If it is not, it is loaded to the pre-specified cache and returned. The cache is cleaned up periodically (every 60 seconds) to free up space.
+
 ### Run the server
 
-- **Local (development):**
+#### Locally
 
 ```bash
 # optionally set the port via env var (defaults to 12345)
 export NNUNET_SERVE_PORT=12345
 
-python -m uvicorn nnunet_serve.nnunet_serve:create_app \
+uv run uvicorn nnunet_serve.nnunet_serve:create_app \
   --host 0.0.0.0 \
   --port ${NNUNET_SERVE_PORT} \
   --reload
@@ -168,6 +180,14 @@ python -m uvicorn nnunet_serve.nnunet_serve:create_app \
   - `NNUNET_SERVE_PORT`: the port the server listens on (default: `12345`).
 
 Ensure your `model-serve-spec.yaml` is present and correctly references your models. GPU and `nvidia-smi` must be available; the server waits for a GPU with enough free memory before running a job.
+
+#### Running as a Docker container
+
+Firstly, users must install [Docker](https://www.docker.com/). **Docker requires `sudo` if not [correctly setup](https://docs.docker.com/engine/install/linux-postinstall/) so be mindful of this!**. Then:
+
+1. Adapt the [`model-serve-spec.yaml`](model-serve-spec.yaml) with your favourite models; this is the blueprint for `model-serve-spec-docker.yaml` (same models but different model directory)
+2. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
+3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`, as well as the output directory if necessary `-v /data/nnunet:/data/nnunet`): `sudo docker run -it -p 50422:50422 --gpus all -v /models:/models -v /data/nnunet:/data/nnunet nnunet_predict`. This will launch the inference server. When specifying the output directory - if the outputs are not supposed to be kept, we recommend using a Docker volume which can be easily deleted. If the server is running internally, it might be interesting to mount a directory in the computer.
 
 ### Endpoints
 
@@ -193,6 +213,9 @@ Ensure your `model-serve-spec.yaml` is present and correctly references your mod
 
 - **`GET /readyz`**
   - Readiness probe indicating whether models are loaded and a GPU is available (if required). Returns `{ "status": "ok" }` when ready, otherwise `{ "status": "starting" }` with additional fields.
+
+- **`GET /expire`**
+  - Expires the TTL cache. Returns `{ "status": "ok" , "message": "Expired {n_items} items"}` when expired, otherwise `{ "status": "error" , "message": "{error message}"}`.
 
 ### Request body schema (InferenceRequest)
 
@@ -295,14 +318,6 @@ curl -X POST http://localhost:12345/infer \
     "save_rt_struct_output": true
   }'
 ```
-
-### Running as a Docker container
-
-Firstly, users must install [Docker](https://www.docker.com/). **Docker requires `sudo` if not [correctly setup](https://docs.docker.com/engine/install/linux-postinstall/) so be mindful of this!**. Then:
-
-1. Adapt the `model-serve-spec.yaml` with your favourite models; this is the blueprint for `model-serve-spec-docker.yaml` (same models but different model directory)
-2. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
-3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`): `sudo docker run -it -p 50422:50422 --gpus all -v /models:/models nnunet_predict`. This will launch the inference server (described below)
 
 ### Operational notes
 
