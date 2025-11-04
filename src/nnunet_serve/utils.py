@@ -306,6 +306,8 @@ def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
             if acquisition_number not in good_file_paths:
                 good_file_paths[acquisition_number] = []
             good_file_paths[acquisition_number].append(dcm_file)
+    if len(good_file_paths) == 0:
+        raise RuntimeError("No DICOM files found")
     good_file_paths = [
         good_file_paths[k] for k in sorted(good_file_paths.keys())
     ][0]
@@ -588,6 +590,7 @@ def wait_for_gpu(min_mem: int, timeout_s: int = 120) -> int:
 def make_parser(
     description: str = "Entrypoint for nnUNet prediction. Handles all data "
     "format conversions and cascades of predictions.",
+    exclude: list[str] = None,
 ) -> argparse.ArgumentParser:
     """
     Convenience function to generate ``argparse`` CLI parser. Helps with
@@ -602,143 +605,172 @@ def make_parser(
         argparse.ArgumentParser: parser with specific args.
     """
     parser = argparse.ArgumentParser(description)
-    parser.add_argument(
-        "--study_path",
-        "-i",
-        help="Path to input series",
-        required=True,
-    )
-    parser.add_argument(
-        "--series_folders",
-        "-s",
-        nargs="+",
-        type=list_of_str,
-        help="Path to input series folders",
-        required=True,
-    )
-    parser.add_argument(
-        "--nnunet_id",
-        nargs="+",
-        help="nnUNet ID",
-        required=True,
-    )
-    parser.add_argument(
-        "--checkpoint_name",
-        help="Checkpoint name for nnUNet",
-        default="checkpoint_final.pth",
-        nargs="+",
-    )
-    parser.add_argument(
-        "--output_dir",
-        "-o",
-        help="Path to output directory",
-        required=True,
-    )
-    parser.add_argument(
-        "--use_folds",
-        "-f",
-        help="Sets which folds should be used with nnUNet",
-        nargs="+",
-        type=int_or_list_of_ints,
-        default=(0,),
-    )
-    parser.add_argument(
-        "--tta",
-        "-t",
-        help="Uses test-time augmentation during prediction",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--tmp_dir",
-        help="Temporary directory",
-        default=".tmp",
-    )
-    parser.add_argument(
-        "--is_dicom",
-        "-D",
-        help="Assumes input is DICOM (and also converts to DICOM seg; \
-            prediction.dcm in output_dir)",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--proba_map",
-        "-p",
-        help="Produces a Nifti format probability map (probabilities.nii.gz \
-            in output_dir)",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--proba_threshold",
-        help="Sets probabilities in proba_map lower than proba_threhosld to 0",
-        type=float_or_none,
-        default=0.5,
-        nargs="+",
-    )
-    parser.add_argument(
-        "--min_confidence",
-        help="Removes objects whose max prob is smaller than min_confidence",
-        type=float_or_none,
-        default=None,
-        nargs="+",
-    )
-    parser.add_argument(
-        "--rt_struct_output",
-        help="Produces a DICOM RT Struct file (struct.dcm in output_dir; requires DICOM input)",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--save_nifti_inputs",
-        "-S",
-        help="Moves Nifti inputs to output folder (volume_XXXX.nii.gz in \
-            output_dir)",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--cascade_mode",
-        help="Defines the cascade mode. Must be either intersect or crop.",
-        default="intersect",
-        type=str,
-        nargs="+",
-        choices=["intersect", "crop"],
-    )
-    parser.add_argument(
-        "--intersect_with",
-        help="Calculates the IoU with the SITK mask image in this path and uses\
-            this value to filter images such that IoU < --min_intersection are ruled out.",
-        default=None,
-        type=str,
-    )
-    parser.add_argument(
-        "--min_intersection",
-        help="Minimum intersection over the union to keep a candidate.",
-        type=float_or_none,
-        default=0.1,
-        nargs="+",
-    )
-    parser.add_argument(
-        "--crop_from",
-        help="Crops the input to the bounding box of the SITK mask image in this path.",
-        default=None,
-        type=str,
-    )
-    parser.add_argument(
-        "--crop_padding",
-        help="Padding to be added to the cropped region.",
-        default=(10, 10, 10),
-        type=int,
-        nargs="+",
-    )
-    parser.add_argument(
-        "--class_idx",
-        help="Class index.",
-        default="all",
-        type=int_or_list_of_ints,
-        nargs="+",
-    )
-    parser.add_argument(
-        "--suffix",
-        help="Adds a suffix (_suffix) to the outputs if specified.",
-        default=None,
-        type=str,
-    )
+    if exclude is None:
+        exclude = []
+    args = [
+        (
+            ("--study_path", "-i"),
+            {"help": "Path to input series", "required": True},
+        ),
+        (
+            ("--series_folders", "-s"),
+            {
+                "nargs": "+",
+                "type": list_of_str,
+                "help": "Path to input series folders",
+                "required": True,
+            },
+        ),
+        (
+            ("--nnunet_id",),
+            {
+                "nargs": "+",
+                "help": "nnUNet ID",
+                "required": True,
+            },
+        ),
+        (
+            ("--checkpoint_name",),
+            {
+                "help": "Checkpoint name for nnUNet",
+                "default": "checkpoint_final.pth",
+                "nargs": "+",
+            },
+        ),
+        (
+            ("--output_dir", "-o"),
+            {"help": "Path to output directory", "required": True},
+        ),
+        (
+            ("--use_folds", "-f"),
+            {
+                "help": "Sets which folds should be used with nnUNet",
+                "nargs": "+",
+                "type": int_or_list_of_ints,
+                "default": (0,),
+            },
+        ),
+        (
+            ("--tta", "-t"),
+            {
+                "help": "Uses test-time augmentation during prediction",
+                "action": "store_true",
+            },
+        ),
+        (
+            ("--tmp_dir",),
+            {"help": "Temporary directory", "default": ".tmp"},
+        ),
+        (
+            ("--is_dicom", "-D"),
+            {
+                "help": "Assumes input is DICOM (and also converts to DICOM seg; prediction.dcm in output_dir)",
+                "action": "store_true",
+            },
+        ),
+        (
+            ("--proba_map", "-p"),
+            {
+                "help": "Produces a Nifti format probability map (probabilities.nii.gz in output_dir)",
+                "action": "store_true",
+            },
+        ),
+        (
+            ("--proba_threshold",),
+            {
+                "help": "Sets probabilities in proba_map lower than proba_threhosld to 0",
+                "type": float_or_none,
+                "default": 0.5,
+                "nargs": "+",
+            },
+        ),
+        (
+            ("--min_confidence",),
+            {
+                "help": "Removes objects whose max prob is smaller than min_confidence",
+                "type": float_or_none,
+                "default": None,
+                "nargs": "+",
+            },
+        ),
+        (
+            ("--rt_struct_output",),
+            {
+                "help": "Produces a DICOM RT Struct file (struct.dcm in output_dir; requires DICOM input)",
+                "action": "store_true",
+            },
+        ),
+        (
+            ("--save_nifti_inputs", "-S"),
+            {
+                "help": "Moves Nifti inputs to output folder (volume_XXXX.nii.gz in output_dir)",
+                "action": "store_true",
+            },
+        ),
+        (
+            ("--cascade_mode",),
+            {
+                "help": "Defines the cascade mode. Must be either intersect or crop.",
+                "default": "intersect",
+                "type": str,
+                "nargs": "+",
+                "choices": ["intersect", "crop"],
+            },
+        ),
+        (
+            ("--intersect_with",),
+            {
+                "help": "Calculates the IoU with the SITK mask image in this path and uses this value to filter images such that IoU < --min_intersection are ruled out.",
+                "default": None,
+                "type": str,
+            },
+        ),
+        (
+            ("--min_intersection",),
+            {
+                "help": "Minimum intersection over the union to keep a candidate.",
+                "type": float_or_none,
+                "default": 0.1,
+                "nargs": "+",
+            },
+        ),
+        (
+            ("--crop_from",),
+            {
+                "help": "Crops the input to the bounding box of the SITK mask image in this path.",
+                "default": None,
+                "type": str,
+            },
+        ),
+        (
+            ("--crop_padding",),
+            {
+                "help": "Padding to be added to the cropped region.",
+                "default": (10, 10, 10),
+                "type": int,
+                "nargs": "+",
+            },
+        ),
+        (
+            ("--class_idx",),
+            {
+                "help": "Class index.",
+                "default": "all",
+                "type": int_or_list_of_ints,
+                "nargs": "+",
+            },
+        ),
+        (
+            ("--suffix",),
+            {
+                "help": "Adds a suffix (_suffix) to the outputs if specified.",
+                "default": None,
+                "type": str,
+            },
+        ),
+    ]
+    for arg in args:
+        if arg[0][0] in exclude:
+            continue
+        parser.add_argument(*arg[0], **arg[1])
     return parser

@@ -514,6 +514,135 @@ class SegWriter:
             return SegWriter(**metadata, validate=validate)
 
 
+def export_predictions(
+    masks: list[sitk.Image],
+    output_dir: str,
+    volumes: list[list[sitk.Image]] | None = None,
+    proba_maps: list[list[sitk.Image]] | None = None,
+    good_file_paths: list[str] | None = None,
+    suffix: str | None = None,
+    is_dicom: bool = False,
+    seg_writers: SegWriter | list[SegWriter] | None = None,
+    save_proba_map: bool = False,
+    save_nifti_inputs: bool = False,
+    save_rt_struct_output: bool = False,
+):
+    output_names = {
+        "prediction": (
+            "prediction" if suffix is None else f"prediction_{suffix}"
+        ),
+        "probabilities": (
+            "probabilities" if suffix is None else f"proba_{suffix}"
+        ),
+        "struct": "struct" if suffix is None else f"struct_{suffix}",
+    }
+
+    output_paths = {}
+    stage_dirs = [
+        os.path.join(output_dir, f"stage_{i}") for i in range(len(masks))
+    ]
+    for stage_dir in stage_dirs:
+        os.makedirs(stage_dir, exist_ok=True)
+
+    mask_paths = []
+    for i, mask in enumerate(masks):
+        output_nifti_path = (
+            f"{stage_dirs[i]}/{output_names['prediction']}.nii.gz"
+        )
+        sitk.WriteImage(mask, output_nifti_path)
+        mask_paths.append(output_nifti_path)
+        logger.info("Exported prediction mask %d to %s", i, output_nifti_path)
+    output_paths["nifti_prediction"] = mask_paths
+
+    if save_proba_map is True:
+        proba_map_paths = []
+        for i, proba_map in enumerate(proba_maps):
+            output_nifti_path = (
+                f"{stage_dirs[i]}/{output_names['probabilities']}.nii.gz"
+            )
+            sitk.WriteImage(proba_map, output_nifti_path)
+            proba_map_paths.append(output_nifti_path)
+            logger.info(
+                "Exported probability map %d to %s", i, output_nifti_path
+            )
+        output_paths["nifti_proba"] = proba_map_paths
+
+    if save_nifti_inputs is True:
+        niftis = []
+        for i, volume_set in enumerate(volumes):
+            for volume in volume_set:
+                output_nifti_path = os.path.join(
+                    stage_dirs[i], "input_volume.nii.gz"
+                )
+                sitk.WriteImage(volume, output_nifti_path)
+                niftis.append(output_nifti_path)
+                logger.info(
+                    "Exported input volume %d to %s", i, output_nifti_path
+                )
+        output_paths["nifti_inputs"] = niftis
+
+    if is_dicom is True:
+        dicom_seg_paths = []
+        dicom_struct_paths = []
+        for i, mask in enumerate(masks):
+            dcm_seg_output_path = (
+                f"{stage_dirs[i]}/{output_names['prediction']}.dcm"
+            )
+            status = seg_writers[i].write_dicom_seg(
+                mask,
+                source_files=good_file_paths[0],
+                output_path=dcm_seg_output_path,
+            )
+            if "empty" in status:
+                logger.info("Mask %d is empty, skipping DICOMseg/RTstruct", i)
+            elif save_rt_struct_output:
+                dcm_rts_output_path = (
+                    f"{stage_dirs[i]}/{output_names['struct']}.dcm"
+                )
+                status = seg_writers[i].write_dicom_rtstruct(
+                    mask,
+                    source_files=good_file_paths[0],
+                    output_path=dcm_rts_output_path,
+                )
+                dicom_seg_paths.append(dcm_seg_output_path)
+                dicom_struct_paths.append(dcm_rts_output_path)
+                logger.info(
+                    "Exported DICOM struct %d to %s", i, dicom_struct_paths[-1]
+                )
+            else:
+                dicom_seg_paths.append(dcm_seg_output_path)
+                logger.info(
+                    "Exported DICOM segmentation %d to %s",
+                    i,
+                    dicom_seg_paths[-1],
+                )
+        output_paths["dicom_segmentation"] = dicom_seg_paths
+        if save_rt_struct_output:
+            output_paths["dicom_struct"] = dicom_struct_paths
+
+        if save_proba_map is True:
+            dicom_proba_paths = []
+            for i, proba_map in enumerate(proba_maps):
+                output_path = (
+                    f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
+                )
+                seg_writers[i].write_dicom_seg(
+                    proba_map,
+                    source_files=good_file_paths[0],
+                    output_path=output_path,
+                    is_fractional=True,
+                )
+                dicom_proba_paths.append(output_path)
+                logger.info(
+                    "Exported DICOM fractional segmentation %d to %s",
+                    i,
+                    dicom_proba_paths[-1],
+                )
+            output_paths["dicom_fractional_segmentation"] = dicom_proba_paths
+
+    return output_paths
+
+
 if __name__ == "__main__":
     seg_writer = SegWriter(
         segment_names=[{"name": "Liver", "number": 1, "label": "Liver"}],

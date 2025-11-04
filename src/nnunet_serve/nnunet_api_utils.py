@@ -7,6 +7,7 @@ import os
 from typing import Any, Union
 
 import numpy as np
+import uuid
 import SimpleITK as sitk
 import torch
 from cachetools import TTLCache
@@ -24,7 +25,7 @@ from nnunetv2.utilities.plans_handling.plans_handler import (
 )
 
 from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.seg_writers import SegWriter
+from nnunet_serve.seg_writers import SegWriter, export_predictions
 from nnunet_serve.sitk_utils import get_crop, to_closest_canonical_sitk
 from nnunet_serve.utils import (
     copy_information_nd,
@@ -35,6 +36,7 @@ from nnunet_serve.utils import (
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
 from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
+from nnunet_serve.process_pool import ProcessPool
 
 logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
@@ -408,6 +410,7 @@ def predict(
     params: dict,
     nnunet_path: str | list[str],
     flip_xy: bool | list[bool] = False,
+    writing_process_pool: ProcessPool | None = None,
 ) -> dict:
     """
     Runs the prediction for a set of models and returns exported output paths.
@@ -423,6 +426,8 @@ def predict(
         nnunet_path (str | list[str]): path or paths to nnUNet model.
         flip_xy (bool | list[bool]): whether to flip the x and y axes during
             inference. Defaults to False.
+        writing_process_pool (ProcessPool | None): process pool to use for parallel
+            file saving operations. Defaults to None.
 
     Returns:
         dict: mapping of output artifact keys to lists of paths.
@@ -506,21 +511,41 @@ def predict(
     except Exception as e:
         raise RuntimeError(f"Inference failed: {e}") from e
 
+    identifiers = []
+
     try:
-        output_paths = export_predictions(
-            masks=all_predictions,
-            proba_maps=all_proba_maps,
-            good_file_paths=good_file_paths,
-            volumes=all_volumes,
-            seg_writers=seg_writers,
-            **export_params,
-        )
+        if writing_process_pool:
+            for i in range(len(all_predictions)):
+                identifier = str(uuid.uuid4())
+                identifiers.append(identifier)
+                writing_process_pool.put(
+                    identifier=identifier,
+                    args=[],
+                    kwargs={
+                        "masks": [all_predictions[i]],
+                        "proba_maps": [all_proba_maps[i]],
+                        "good_file_paths": [good_file_paths[i]],
+                        "volumes": [all_volumes[i]],
+                        "seg_writers": [seg_writers[i]],
+                        **export_params,
+                    },
+                )
+            output_paths = {}
+        else:
+            output_paths = export_predictions(
+                masks=all_predictions,
+                proba_maps=all_proba_maps,
+                good_file_paths=good_file_paths,
+                volumes=all_volumes,
+                seg_writers=seg_writers,
+                **export_params,
+            )
     except Exception as e:
         raise RuntimeError(f"Failed to export predictions: {e}") from e
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return output_paths
+    return output_paths, identifiers
 
 
 def load_series(series_paths: list[list[str]], is_dicom: bool = False):
@@ -1063,132 +1088,3 @@ def multi_model_inference(
     logger.info("Finished inference")
 
     return all_predictions, all_proba_maps, good_file_paths, all_volumes
-
-
-def export_predictions(
-    masks: list[sitk.Image],
-    output_dir: str,
-    volumes: list[list[sitk.Image]] | None = None,
-    proba_maps: list[list[sitk.Image]] | None = None,
-    good_file_paths: list[str] | None = None,
-    suffix: str | None = None,
-    is_dicom: bool = False,
-    seg_writers: SegWriter | list[SegWriter] | None = None,
-    save_proba_map: bool = False,
-    save_nifti_inputs: bool = False,
-    save_rt_struct_output: bool = False,
-):
-    output_names = {
-        "prediction": (
-            "prediction" if suffix is None else f"prediction_{suffix}"
-        ),
-        "probabilities": (
-            "probabilities" if suffix is None else f"proba_{suffix}"
-        ),
-        "struct": "struct" if suffix is None else f"struct_{suffix}",
-    }
-
-    output_paths = {}
-    stage_dirs = [
-        os.path.join(output_dir, f"stage_{i}") for i in range(len(masks))
-    ]
-    for stage_dir in stage_dirs:
-        os.makedirs(stage_dir, exist_ok=True)
-
-    mask_paths = []
-    for i, mask in enumerate(masks):
-        output_nifti_path = (
-            f"{stage_dirs[i]}/{output_names['prediction']}.nii.gz"
-        )
-        sitk.WriteImage(mask, output_nifti_path)
-        mask_paths.append(output_nifti_path)
-        logger.info("Exported prediction mask %d to %s", i, output_nifti_path)
-    output_paths["nifti_prediction"] = mask_paths
-
-    if save_proba_map is True:
-        proba_map_paths = []
-        for i, proba_map in enumerate(proba_maps):
-            output_nifti_path = (
-                f"{stage_dirs[i]}/{output_names['probabilities']}.nii.gz"
-            )
-            sitk.WriteImage(proba_map, output_nifti_path)
-            proba_map_paths.append(output_nifti_path)
-            logger.info(
-                "Exported probability map %d to %s", i, output_nifti_path
-            )
-        output_paths["nifti_proba"] = proba_map_paths
-
-    if save_nifti_inputs is True:
-        niftis = []
-        for i, volume_set in enumerate(volumes):
-            for volume in volume_set:
-                output_nifti_path = os.path.join(
-                    stage_dirs[i], "input_volume.nii.gz"
-                )
-                sitk.WriteImage(volume, output_nifti_path)
-                niftis.append(output_nifti_path)
-                logger.info(
-                    "Exported input volume %d to %s", i, output_nifti_path
-                )
-        output_paths["nifti_inputs"] = niftis
-
-    if is_dicom is True:
-        dicom_seg_paths = []
-        dicom_struct_paths = []
-        for i, mask in enumerate(masks):
-            dcm_seg_output_path = (
-                f"{stage_dirs[i]}/{output_names['prediction']}.dcm"
-            )
-            status = seg_writers[i].write_dicom_seg(
-                mask,
-                source_files=good_file_paths[0],
-                output_path=dcm_seg_output_path,
-            )
-            if "empty" in status:
-                logger.info("Mask %d is empty, skipping DICOMseg/RTstruct", i)
-            elif save_rt_struct_output:
-                dcm_rts_output_path = (
-                    f"{stage_dirs[i]}/{output_names['struct']}.dcm"
-                )
-                status = seg_writers[i].write_dicom_rtstruct(
-                    mask,
-                    source_files=good_file_paths[0],
-                    output_path=dcm_rts_output_path,
-                )
-                dicom_seg_paths.append(dcm_seg_output_path)
-                dicom_struct_paths.append(dcm_rts_output_path)
-                logger.info(
-                    "Exported DICOM struct %d to %s", i, dicom_struct_paths[-1]
-                )
-            else:
-                dicom_seg_paths.append(dcm_seg_output_path)
-                logger.info(
-                    "Exported DICOM segmentation %d to %s",
-                    i,
-                    dicom_seg_paths[-1],
-                )
-        output_paths["dicom_segmentation"] = dicom_seg_paths
-        if save_rt_struct_output:
-            output_paths["dicom_struct"] = dicom_struct_paths
-
-        if save_proba_map is True:
-            dicom_proba_paths = []
-            for i, proba_map in enumerate(proba_maps):
-                output_path = (
-                    f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
-                )
-                seg_writers[i].write_dicom_seg(
-                    proba_map,
-                    source_files=good_file_paths[0],
-                    output_path=output_path,
-                    is_fractional=True,
-                )
-                dicom_proba_paths.append(output_path)
-                logger.info(
-                    "Exported DICOM fractional segmentation %d to %s",
-                    i,
-                    dicom_proba_paths[-1],
-                )
-            output_paths["dicom_fractional_segmentation"] = dicom_proba_paths
-
-    return output_paths

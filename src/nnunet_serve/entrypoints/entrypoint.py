@@ -82,11 +82,12 @@ def main_with_args(args):
 
 
 def main():
-    parser = make_parser()
+    parser = make_parser(
+        description="Single study inference for nnunet_serve.",
+    )
 
     args = parser.parse_args()
 
-    args.output_dir = args.output_dir.strip().rstrip("/")
     pprint.pprint(main_with_args(args))
 
     torch.cuda.empty_cache()

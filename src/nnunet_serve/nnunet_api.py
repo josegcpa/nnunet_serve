@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import time
 import uuid
+import asyncio
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
@@ -49,6 +50,7 @@ from nnunet_serve.totalseg_utils import (
     load_snomed_mapping_expanded,
 )
 from nnunet_serve.utils import get_gpu_memory, wait_for_gpu
+from nnunet_serve.process_pool import ProcessPool
 
 logger = get_logger(__name__)
 
@@ -243,6 +245,17 @@ def get_model_dictionary() -> tuple[dict, dict]:
 @dataclass
 class nnUNetAPI:
     app: fastapi.FastAPI | None = None
+    writing_process_pool: ProcessPool | None = None
+    """
+    General nnU-Net API.
+    
+    **Important:** the ``writing_process_pool`` is only implemented for the 
+    command line entrypoints and, as such, is only used when ``app`` is None.
+    
+    Args:
+        app: FastAPI application
+        writing_process_pool: ProcessPool for writing files.
+    """
 
     def __post_init__(self):
         if torch.cuda.is_available() is False:
@@ -435,10 +448,13 @@ class nnUNetAPI:
         Returns:
             JSONResponse: Inference response.
         """
+        if self.app is not None and self.writing_process_pool is not None:
+            raise ValueError("Cannot use both app and writing_process_pool")
         params = inference_request.__dict__
         if isinstance(params["cascade_mode"], list) is False:
             params["cascade_mode"] = [params["cascade_mode"]]
         params["cascade_mode"] = [x.value for x in params["cascade_mode"]]
+        params["checkpoint_name"] = [x.value for x in params["checkpoint_name"]]
         nnunet_id = params["nnunet_id"]
         if isinstance(nnunet_id, str):
             if nnunet_id not in self.alias_dict:
@@ -574,8 +590,8 @@ class nnUNetAPI:
             mirroring = True
 
         a = time.time()
-        if os.environ.get("DEBUG", 0) == "1":
-            output_paths = predict(
+        if os.environ.get("DEBUG", "0") == "1":
+            output_paths, identifiers = predict(
                 series_paths=series_paths,
                 metadata=metadata,
                 mirroring=mirroring,
@@ -583,12 +599,13 @@ class nnUNetAPI:
                 params=params,
                 nnunet_path=nnunet_path,
                 flip_xy=is_totalseg,
+                writing_process_pool=self.writing_process_pool,
             )
             error = None
             status = SUCCESS_STATUS
         else:
             try:
-                output_paths = predict(
+                output_paths, identifiers = predict(
                     series_paths=series_paths,
                     metadata=metadata,
                     mirroring=mirroring,
@@ -596,6 +613,7 @@ class nnUNetAPI:
                     params=params,
                     nnunet_path=nnunet_path,
                     flip_xy=is_totalseg,
+                    writing_process_pool=self.writing_process_pool,
                 )
                 error = None
                 status = SUCCESS_STATUS
@@ -619,6 +637,7 @@ class nnUNetAPI:
             "request": params,
             "status": status,
             "error": error,
+            "identifiers": identifiers,
             **output_paths,
         }
         if status == FAILURE_STATUS:
