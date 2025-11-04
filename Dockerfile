@@ -9,7 +9,13 @@ ENV NNUNET_OUTPUT_DIR=/data/nnunet
 
 # install internal dependencies
 COPY docker-installations.sh docker-installations.sh
-RUN bash docker-installations.sh
+RUN pip install uv pip && \
+    uv pip install --system setuptools wheel && \
+    uv pip install --system -r requirements.txt && \
+    uv clean && \
+    apt update && \
+    apt install libgl1 libglib2.0-0 git -y && \
+    apt clean
 
 # install environment
 COPY pyproject.toml pyproject.toml
