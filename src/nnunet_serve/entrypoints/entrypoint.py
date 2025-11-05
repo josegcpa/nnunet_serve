@@ -17,9 +17,13 @@ from nnunet_serve.nnunet_api import nnUNetAPI
 from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
 from nnunet_serve.api_datamodels import InferenceRequest
 from nnunet_serve.utils import make_parser
+from nnunet_serve.logging_utils import add_file_handler_to_manager
 
 
 def main_with_args(args):
+    add_file_handler_to_manager(
+        log_path=os.path.join(args.output_dir, "nnunet_serve.log")
+    )
     nnunet_api = nnUNetAPI()
 
     inference_request = InferenceRequest(

@@ -18,12 +18,21 @@ from nnunet_serve.nnunet_api import nnUNetAPI
 from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
 from nnunet_serve.process_pool import WritingProcessPool
 from nnunet_serve.utils import make_parser
-from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.logging_utils import get_logger, add_file_handler_to_manager
 
 logger = get_logger(__name__)
 
 
 def main_with_args(args):
+    with open(args.data_json) as o:
+        data = json.load(o)
+    add_file_handler_to_manager(
+        log_path=os.path.join(data[0]["output_dir"], "nnunet_serve_proc.log"),
+        exclude=[
+            "nnunet_serve.nnunet_api_utils",
+            "nnunet_serve.nnunet_api",
+        ],
+    )
     if args.nproc_writing > 1:
         logger.info("Using %i processes for writing", args.nproc_writing)
         writing_process_pool = WritingProcessPool(args.nproc_writing)
@@ -32,8 +41,6 @@ def main_with_args(args):
     nnunet_api = nnUNetAPI(writing_process_pool=writing_process_pool)
 
     responses = []
-    with open(args.data_json) as o:
-        data = json.load(o)
     logger.info("Processing %i studies", len(data))
     for i, item in enumerate(data):
         logger.info(

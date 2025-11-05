@@ -7,7 +7,6 @@ import shutil
 import sqlite3
 import time
 import uuid
-import asyncio
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
@@ -34,7 +33,7 @@ from nnunet_serve.file_utils import (
     zip_directory,
     NNUNET_OUTPUT_DIR,
 )
-from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.logging_utils import get_logger, add_file_handler_to_manager
 from nnunet_serve.nnunet_api_utils import (
     FAILURE_STATUS,
     SUCCESS_STATUS,
@@ -455,6 +454,15 @@ class nnUNetAPI:
             params["cascade_mode"] = [params["cascade_mode"]]
         params["cascade_mode"] = [x.value for x in params["cascade_mode"]]
         params["checkpoint_name"] = [x.value for x in params["checkpoint_name"]]
+        add_file_handler_to_manager(
+            log_path=os.path.join(params["output_dir"], "nnunet_serve.log"),
+            exclude=[
+                "nnunet_serve.entrypoints.entrypoint_batch",
+                "nnunet_serve.entrypoints.entrypoint",
+                "nnunet_serve.process_pool",
+                "nnunet_serve.seg_writers",
+            ],
+        )
         nnunet_id = params["nnunet_id"]
         if isinstance(nnunet_id, str):
             if nnunet_id not in self.alias_dict:
@@ -520,6 +528,7 @@ class nnUNetAPI:
             else:
                 if params[k] is None:
                     params[k] = default_params[k]
+        params["min_mem"] = min_mem
 
         if params.get("save_proba_map", False) and all(
             [x is None for x in params.get("proba_threshold", [])]
@@ -631,7 +640,6 @@ class nnUNetAPI:
 
         payload = {
             "time_elapsed": b - a,
-            "gpu": device_id,
             "nnunet_path": nnunet_path,
             "metadata": metadata,
             "request": params,

@@ -534,7 +534,7 @@ def predict(
                     kwargs={
                         "masks": [all_predictions[i]],
                         "proba_maps": [all_proba_maps[i]],
-                        "good_file_paths": [good_file_paths[i]],
+                        "good_file_paths": good_file_paths,
                         "volumes": [all_volumes[i]],
                         "seg_writers": [seg_writers[i]],
                         **export_params,

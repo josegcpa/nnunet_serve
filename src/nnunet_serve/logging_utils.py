@@ -5,6 +5,7 @@ Minimal utilities for logging.
 import logging
 import os
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 LOGS_DIR = os.environ.get("LOGS_DIR", "./logs")
 
@@ -12,6 +13,8 @@ formatter = logging.Formatter(
     fmt="%(asctime)s,%(msecs)03d %(name)s %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+MANAGER = logging.Manager(logging.getLogger())
 
 
 def get_logger(log_name: str):
@@ -28,7 +31,7 @@ def get_logger(log_name: str):
     Returns:
         logging.Logger: The logger.
     """
-    logger = logging.getLogger(log_name)
+    logger = MANAGER.getLogger(log_name)
     logger.propagate = False
     level_env = os.environ.get("NNUNET_SERVE_LOGGING_LEVEL", "INFO")
     if isinstance(level_env, str):
@@ -48,36 +51,33 @@ def get_logger(log_name: str):
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
-    if os.getenv("NNUNET_SERVE_LOG_TO_FILE", "0") == "1":
-        from logging.handlers import RotatingFileHandler
-
-        add_file_handler(logger, log_name)
-        for h in list(logger.handlers):
-            if isinstance(h, logging.FileHandler) and not isinstance(
-                h, RotatingFileHandler
-            ):
-                logger.removeHandler(h)
-        rotating = RotatingFileHandler(
-            f"{LOGS_DIR}/{log_name}.log",
-            maxBytes=5 * 1024 * 1024,
-            backupCount=5,
-            encoding="utf-8",
-        )
-        rotating.setFormatter(formatter)
-        logger.addHandler(rotating)
-        try:
-            os.chmod(rotating.baseFilename, 0o600)
-        except Exception:
-            pass
-
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
-
     return logger
 
 
-def add_file_handler(logger: logging.Logger, log_name: str) -> None:
+def add_file_handler_to_manager(
+    log_name: str | None = None,
+    log_path: str | None = None,
+    exclude: list[str] = [],
+) -> None:
+    """
+    Adds a file handler to all loggers in the manager.
+
+    Args:
+        log_name (str): The name of the log file.
+    """
+    for logger in MANAGER.loggerDict.values():
+        if isinstance(logger, logging.PlaceHolder):
+            continue
+        if logger.name in exclude:
+            continue
+        add_file_handler(logger, log_name=log_name, log_path=log_path)
+
+
+def add_file_handler(
+    logger: logging.Logger,
+    log_name: str | None = None,
+    log_path: str | None = None,
+) -> None:
     """
     Adds a file handler to the logger.
 
@@ -85,11 +85,23 @@ def add_file_handler(logger: logging.Logger, log_name: str) -> None:
         logger (logging.Logger): The logger to add the file handler to.
         log_name (str): The name of the log file.
     """
+    if log_path is None:
+        if log_name is None:
+            raise ValueError(
+                "log_name must be provided if log_path is not provided"
+            )
+        log_path = f"{LOGS_DIR}/{log_name}.log"
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    if logger.handlers:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                if handler.baseFilename == log_path:
+                    return
     Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter(
         fmt="%(asctime)s,%(msecs)03d %(name)s %(levelname)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    file_handler = logging.FileHandler(f"{LOGS_DIR}/{log_name}.log")
+    file_handler = logging.FileHandler(log_path)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
