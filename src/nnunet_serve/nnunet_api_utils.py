@@ -629,11 +629,11 @@ def process_proba_array(
         mask = np.argmax(proba_array, 0)
         proba_array = np.moveaxis(proba_array, 0, -1)
     else:
-        proba_array = np.where(proba_array < proba_threshold, 0.0, proba_array)
         if isinstance(class_idx, int):
             proba_array = proba_array[class_idx]
         elif isinstance(class_idx, (list, tuple)):
             proba_array = proba_array[class_idx].sum(0)
+        proba_array = np.where(proba_array < proba_threshold, 0.0, proba_array)
         proba_array, _, _ = extract_lesion_candidates(
             proba_array,
             threshold=proba_threshold,
@@ -860,10 +860,11 @@ def single_model_inference(
         "out_direction": original_direction,
         "out_origin": original_origin,
     }
-    if proba_threshold is not None:
+    if intersect_with is not None:
         intersect_with = filter_labels(
             intersect_with, intersect_with_class_idx, True
         )
+    if proba_threshold is not None:
         mask, probability_map, _ = process_proba_array(
             proba_array,
             volumes[0],
@@ -900,7 +901,9 @@ def single_model_inference(
         )
 
     if probability_map is not None:
-        probability_map = mask * probability_map
+        probability_map = (
+            sitk.Cast(mask, probability_map.GetPixelID()) * probability_map
+        )
 
     logger.info("Finished processing masks")
 

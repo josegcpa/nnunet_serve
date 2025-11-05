@@ -632,6 +632,7 @@ class nnUNetAPI:
 
             except Exception as e:
                 output_paths = {}
+                identifiers = []
                 status = FAILURE_STATUS
                 error = str(e)
         if torch.cuda.is_available():

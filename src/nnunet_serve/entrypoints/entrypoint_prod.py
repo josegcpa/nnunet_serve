@@ -6,6 +6,9 @@ import requests
 
 from nnunet_serve.entrypoints.entrypoint import main_with_args
 from nnunet_serve.utils import make_parser
+from nnunet_serve.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class Timer:
@@ -16,9 +19,9 @@ class Timer:
     def print_time(self, extra_str=None):
         elapsed_time = time.time() - self.start_time
         if extra_str is None:
-            print(f"Elapsed time {self.count}: {elapsed_time} seconds")
+            logger.info(f"Elapsed time {self.count}: {elapsed_time} seconds")
         else:
-            print(
+            logger.info(
                 f"Elapsed time {self.count} ({extra_str}): \
                   {elapsed_time} seconds"
             )
@@ -93,7 +96,7 @@ if __name__ == "__main__":
             status = args.failure_message
             log_out = ""
             err = repr(e)
-            print(e)
+            logger.error(e)
     else:
         log_out = main_with_args(args)
         status = args.success_message
@@ -112,7 +115,9 @@ if __name__ == "__main__":
     }
 
     if (args.update_url is not None) and (args.update_url != "skip"):
-        print(f"Posting {status} to {args.update_url} for job {args.job_id}")
+        logger.info(
+            f"Posting {status} to {args.update_url} for job {args.job_id}"
+        )
         requests.post(
             f"{args.update_url}",
             data=data,

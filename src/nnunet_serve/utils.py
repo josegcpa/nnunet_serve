@@ -680,7 +680,7 @@ def make_parser(
             {
                 "help": "Sets probabilities in proba_map lower than proba_threhosld to 0",
                 "type": float_or_none,
-                "default": 0.5,
+                "default": None,
                 "nargs": "+",
             },
         ),
