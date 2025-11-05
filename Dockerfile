@@ -44,4 +44,4 @@ RUN mkdir -p $NNUNET_OUTPUT_DIR
 # downloads total segmentator models if necessary 
 RUN uv run nnunet-validate-metadata
 
-ENTRYPOINT ["uv", "run"]
+ENTRYPOINT ["uv", "run" ,"--project", "/app"]
