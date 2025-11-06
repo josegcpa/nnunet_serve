@@ -316,7 +316,6 @@ Notes:
 
 On success (HTTP 200):
 - **`time_elapsed`**: seconds to complete the request.
-- **`gpu`**: CUDA device index used.
 - **`nnunet_path`**: string or list of model paths used.
 - **`metadata`**: metadata object(s) used for DICOM export (if any).
 - **`request`**: echoed request body.
@@ -340,7 +339,7 @@ On failure:
 
 On success (HTTP 200):
 - **`job_id`**: unique identifier for the inference job.
-- All fields from the `/infer` response schema are included (`time_elapsed`, `gpu`, `nnunet_path`, `metadata`, `request`, `status`, exported file paths, etc.).
+- All fields from the `/infer` response schema are included (`time_elapsed`, `nnunet_path`, `metadata`, `request`, `status`, exported file paths, etc.).
 - The `request` field reflects the original request payload (without `study_path` as it is inferred from the uploaded file).
 
 On failure (HTTP 400/500):
