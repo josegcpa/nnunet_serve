@@ -194,6 +194,8 @@ This can be used as follows:
 
 #### Running batch inference
 
+Using the dataset JSON:
+
 ```bash
 uv run nnunet-predict-batch \
     --data_json data_json.json \
@@ -207,11 +209,25 @@ uv run nnunet-predict-batch \
     --save_nifti_inputs
 ```
 
+Using the data directory (requires specifying `--output_dir` as well):
+
+```bash
+uv run nnunet-predict-batch \
+    --data_dir <data_dir> \
+    --output_dir <output_dir> \
+    --nnunet_id prostate prostate_zones \
+    --use_folds 0 1 2 3 4 \
+    --tta \
+    --proba_map \
+    --proba_threshold 0.1 \
+    --min_confidence 0.5 \
+    --cascade_mode crop \
+    --save_nifti_inputs
+```
+
 All CLI arguments supported by `nnunet-predict` are available; the script forwards them to each study entry. Either `--data_json` or `--data_dir` (with `--output_dir`) must be provided for batch mode.
 
 Refer to `src/nnunet_serve/entrypoints/entrypoint_batch.py` for the full implementation.
-
-
 
 ### API
 
