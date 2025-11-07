@@ -184,6 +184,14 @@ Example (`data_json.json`):
 ]
 ```
 
+#### Data directory format
+
+The data directory format is an alternative to the data JSON format - it probably easier for centers which follow a minimally structured data organization with patient/study/series format and where each series is tagged with an underscore-separated indicator similar to nnU‑Net (e.g. 'series_0000', 'series_0001', etc.).
+
+This can be used as follows:
+
+- `--data_dir`: Path to a hierarchical directory containing patient/study/series folders. Each series folder must be named with an underscore‑separated index (e.g., `series_0000`, `series_0001`, …). This option is mutually exclusive with `--data_json` and requires `--output_dir` to specify where results will be written.
+
 #### Running batch inference
 
 ```bash
@@ -199,7 +207,7 @@ uv run nnunet-predict-batch \
     --save_nifti_inputs
 ```
 
-All CLI arguments supported by `nnunet-predict` are available; the script forwards them to each study entry. The `--data_json` argument is mandatory for batch mode.
+All CLI arguments supported by `nnunet-predict` are available; the script forwards them to each study entry. Either `--data_json` or `--data_dir` (with `--output_dir`) must be provided for batch mode.
 
 Refer to `src/nnunet_serve/entrypoints/entrypoint_batch.py` for the full implementation.
 
