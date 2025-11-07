@@ -42,10 +42,15 @@ def main_with_args(args):
                     for s in study_id.iterdir()
                     if series_pattern.match(s.name)
                 ]
+                numbers_series = [
+                    int(x.split("_")[1].split(".")[0]) for x in series
+                ]
                 series = sorted(
-                    series,
-                    key=lambda x: int(x.split("_")[1].split(".")[0]),
+                    series, key=lambda x: numbers_series[series.index(x)]
                 )
+                assert sorted(numbers_series) == list(
+                    range(len(series))
+                ), "Series numbers must be contiguous and starting at 0 (series_0000, series_0001, etc.)"
                 data.append(
                     {
                         "study_path": str(study_id),
