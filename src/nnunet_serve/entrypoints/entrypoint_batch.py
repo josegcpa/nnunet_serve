@@ -5,6 +5,7 @@ or DICOM format.
 
 import json
 import os
+import re
 import pprint
 import shutil
 import sys
@@ -24,8 +25,40 @@ logger = get_logger(__name__)
 
 
 def main_with_args(args):
-    with open(args.data_json) as o:
-        data = json.load(o)
+    if args.data_json is None and args.data_dir is None:
+        raise ValueError("Must provide either --data_json or --data_dir")
+    if args.data_json:
+        with open(args.data_json) as o:
+            data = json.load(o)
+    else:
+        if args.output_dir is None:
+            raise ValueError("Must provide --output_dir when using --data_dir")
+        series_pattern = re.compile(r".*_[0-9]{4}")
+        data = []
+        for patient_id in Path(args.data_dir).iterdir():
+            for study_id in patient_id.iterdir():
+                series = [
+                    s.name
+                    for s in study_id.iterdir()
+                    if series_pattern.match(s.name)
+                ]
+                series = sorted(
+                    series,
+                    key=lambda x: int(x.split("_")[1].split(".")[0]),
+                )
+                data.append(
+                    {
+                        "study_path": str(study_id),
+                        "series_folders": [[str(x) for x in series]],
+                        "output_dir": str(
+                            os.path.join(
+                                args.output_dir, patient_id.name, study_id.name
+                            )
+                        ),
+                    }
+                )
+
+    print(data)
     add_file_handler_to_manager(
         log_path=os.path.join(data[0]["output_dir"], "nnunet_serve_proc.log"),
         exclude=[
@@ -130,12 +163,28 @@ def main():
         ],
     )
     parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to data directory. This data directory should have a "
+        "hierarchical patient/study/series format and each series should be "
+        "tagged with an underscore-separated indicator similar to nnU-Net "
+        "(e.g. 'series_0000', 'series_0001', etc.). Is overridden by "
+        "--data_json. Requires --output_dir to be specified.",
+    )
+    parser.add_argument(
         "--data_json",
         type=str,
-        required=True,
+        default=None,
         help="Path to data JSON file. This file should contain a list of "
         "dictionaries, each of which has {'study_path': <path>, "
-        "'series_folders': <path>, 'output_dir': <path>}.",
+        "'series_folders': <path>, 'output_dir': <path>}. Overrides --data_dir",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory. Required when using --data_dir.",
     )
     parser.add_argument(
         "--nproc_writing",
