@@ -864,6 +864,11 @@ def single_model_inference(
         intersect_with = filter_labels(
             intersect_with, intersect_with_class_idx, True
         )
+        if crop_from is not None:
+            intersect_with = intersect_with[
+                bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]
+            ]
+        intersect_with = resample_image(intersect_with, spacing, is_mask=True)
     if proba_threshold is not None:
         mask, probability_map, _ = process_proba_array(
             proba_array,
