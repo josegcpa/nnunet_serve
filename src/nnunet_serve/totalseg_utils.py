@@ -97,5 +97,4 @@ def load_snomed_mapping_expanded():
                 snomed_mapping[k]["property_type"]["code"] = snomed_mapping[k][
                     "property_type"
                 ]["value"]
-
     return snomed_mapping

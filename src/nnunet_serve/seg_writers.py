@@ -36,9 +36,15 @@ logger = get_logger(__name__)
 DEFAULT_SEGMENT_SCHEME = os.environ.get("DEFAULT_SEGMENT_SCHEME", "SCT")
 
 
-def process_name(name: str) -> str:
+def strip_laterality(name: str) -> str:
     name = re.sub("[ _]*[lL]eft[ _]*", "", name)
     name = re.sub("[ _]*[rR]ight[ _]*", "", name)
+    name = name.strip()
+    return name
+
+
+def process_name(name: str) -> str:
+    name = strip_laterality(name)
     name = re.sub("[ _]+", "", name)
     name = name.strip()
     return name
@@ -133,9 +139,24 @@ def get_segment_type_code(segment: dict | str, i: int) -> Code:
         segment_dict["code"] = code_info[1]
     segment_code = Code(
         value=segment_dict["code"],
-        meaning=segment_dict["name"],
+        meaning=strip_laterality(to_camel_case(segment_dict["name"], " ")),
         scheme_designator=segment_dict["scheme"],
     )
+
+    if segment_dict["category_number"] is None:
+        segment_dict["category_number"] = CATEGORY_MAPPING[
+            segment_dict["scheme"]
+        ]["type"][str(segment_code.value)]
+
+    laterality = get_laterality(segment_dict["label"])
+    if not laterality:
+        laterality = get_laterality(segment_dict["name"])
+    segment_dict["laterality"] = laterality
+    if laterality:
+        if str(segment_dict["category_number"]) == "49755003":
+            pass
+        elif laterality.lower() not in segment_dict["label"].lower():
+            segment_dict["label"] = f'{laterality} {segment_dict["label"]}'
     return segment_code, segment_dict
 
 
@@ -307,18 +328,12 @@ class SegWriter:
             self.segment_descriptions = []
         for i, segment in enumerate(self.segment_names):
             type_code, segment_dict = get_segment_type_code(segment, i)
-
-            if segment_dict["category_number"] is None:
-                category_number = CATEGORY_MAPPING[segment_dict["scheme"]][
-                    "type"
-                ][str(type_code.value)]
             category_code = [
                 category_concepts[k]
                 for k in category_concepts
-                if category_concepts[k].value == category_number
+                if category_concepts[k].value == segment_dict["category_number"]
             ][0]
             random_rgb_colour = random_color_generator()
-            laterality = get_laterality(segment_dict["label"])
             segment_description = hd.seg.SegmentDescription(
                 segment_number=segment_dict["number"],
                 segment_label=segment_dict["label"],
@@ -332,8 +347,10 @@ class SegWriter:
             segment_description.RecommendedDisplayCIELabValue = rgb_to_cielab(
                 random_rgb_colour
             )
-            if laterality is not None:
-                lat_code = LATERALITY_CODING[segment_dict["scheme"]][laterality]
+            if segment_dict["laterality"] is not None:
+                lat_code = LATERALITY_CODING[segment_dict["scheme"]][
+                    segment_dict["laterality"]
+                ]
                 segment_description.SegmentedPropertyTypeModifierCodeSequence = [
                     lat_code
                 ]

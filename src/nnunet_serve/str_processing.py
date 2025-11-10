@@ -1,12 +1,13 @@
 from copy import deepcopy
 
 
-def to_camel_case(snake_str: str) -> str:
+def to_camel_case(snake_str: str, join_str="") -> str:
     """
     Convert a snake_case string to a camelCase string.
 
     Args:
         snake_str (str): snake_case or space-separated string to convert.
+        join_str (str): string to join the words with.
 
     Returns:
         str: camel case string.
@@ -16,11 +17,15 @@ def to_camel_case(snake_str: str) -> str:
     elif "_" in snake_str or snake_str[0].islower():
         snake_str = deepcopy(snake_str)
         snake_str = snake_str.capitalize()
-        return "".join(x.capitalize() for x in snake_str.lower().split("_"))
+        return join_str.join(
+            x.capitalize() for x in snake_str.lower().split("_")
+        )
     elif " " in snake_str:
         snake_str = deepcopy(snake_str)
         snake_str = snake_str.capitalize()
-        return "".join(x.capitalize() for x in snake_str.lower().split(" "))
+        return join_str.join(
+            x.capitalize() for x in snake_str.lower().split(" ")
+        )
     return snake_str
 
 

@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
@@ -48,6 +49,7 @@ from nnunet_serve.totalseg_utils import (
     REVERSE_TASK_CONVERSION,
     load_snomed_mapping_expanded,
 )
+from nnunet_serve.seg_writers import SegWriter
 from nnunet_serve.utils import get_gpu_memory, wait_for_gpu
 from nnunet_serve.process_pool import ProcessPool
 
@@ -150,8 +152,8 @@ def get_model_dictionary() -> tuple[dict, dict]:
                 raise ValueError(
                     "nnunet_serve currently does not support TotalSegmentator multi-part models. "
                     f"Consider using one of the following: {possibilities}."
-                    "If multi-part segmentation is important for you: please open an issue at "
-                    "https://github.com/josegcpa/nnunet_serve/issues and we will try to push "
+                    "If multi-part segmentation is important for you: please consider opening an issue "
+                    "at https://github.com/josegcpa/nnunet_serve/issues and we will try to push "
                     "this forward."
                 )
             else:
@@ -350,6 +352,12 @@ class nnUNetAPI:
             response_model=dict[str, Any],
         )
         self.app.add_api_route(
+            "/model_info_clean",
+            self.model_info_clean,
+            methods=["GET"],
+            response_model=dict[str, Any],
+        )
+        self.app.add_api_route(
             "/request-params",
             self.request_params,
             methods=["GET"],
@@ -399,7 +407,42 @@ class nnUNetAPI:
         Returns:
             dict: Model information.
         """
-        return self.model_dictionary
+        return self.model_info_clean()
+
+    def model_info_clean(self):
+        """
+        Returns the model information with cleaned metadata.
+
+        Returns:
+            dict: Model information.
+        """
+        model_dict = deepcopy(self.model_dictionary)
+        for model in model_dict.values():
+            sd = SegWriter.init_from_metadata_dict(
+                model["metadata"]
+            ).segment_descriptions
+            for i in range(len(sd)):
+                try:
+                    label = sd[i][0x0062, 0x0005].value
+                except KeyError:
+                    label = None
+                try:
+                    meaning = sd[i][0x0062, 0x000F][0][0x0008, 0x0104].value
+                except KeyError:
+                    meaning = None
+                try:
+                    laterality = sd[i][0x0062, 0x0011][0][0x0008, 0x0104].value
+                except KeyError:
+                    laterality = None
+                sd[i] = {
+                    "Index": i + 1,
+                    "Label": label,
+                    "Meaning": meaning,
+                    "Laterality": laterality,
+                }
+
+            model["metadata"] = sd
+        return model_dict
 
     def request_params(self):
         """
