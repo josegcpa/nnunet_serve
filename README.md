@@ -418,3 +418,35 @@ curl -X POST http://localhost:12345/infer \
 - **Strict GPU requirement:** The server requires an NVIDIA GPU and `nvidia-smi`. It waits for a GPU with at least the model’s `min_mem` free memory (`wait_for_gpu()`), using the maximum `min_mem` across models for multi-model requests. CPU-only systems are not supported.
 - **CORS:** No CORS middleware is configured by default. If you expose the API to browsers, configure CORS as appropriate for your deployment.
 - **Debug mode:** Set environment variable `DEBUG=1` to disable try/except around inference.
+
+# Citation
+
+If you use this repository please cite the Zenodo repository as below.
+
+**APA**
+
+```
+de Almeida, J. G., & Papanikolaou, N. (2025). josegcpa/nnunet_serve: v0.1 (v0.1). Zenodo. https://doi.org/10.5281/zenodo.17522203
+```
+
+**BibTex**
+
+```
+@software{de_almeida_2025_17522203,
+  author       = {de Almeida, José Guilherme and
+                  Papanikolaou, Nikolaos},
+  title        = {josegcpa/nnunet\_serve: v0.1},
+  month        = nov,
+  year         = 2025,
+  publisher    = {Zenodo},
+  version      = {v0.1},
+  doi          = {10.5281/zenodo.17522203},
+  url          = {https://doi.org/10.5281/zenodo.17522203},
+  swhid        = {swh:1:dir:af8aa6feda0eb9a33d98a4629a978bc289ad9537
+                   ;origin=https://doi.org/10.5281/zenodo.17522202;vi
+                   sit=swh:1:snp:ff077fba54804103b26419786f5f4035a9ae
+                   3fa6;anchor=swh:1:rel:75c79771ab9c7e121eae8b4e50f4
+                   5fe396abe1dc;path=josegcpa-nnunet\_serve-c5a1f06
+                  },
+}
+```
