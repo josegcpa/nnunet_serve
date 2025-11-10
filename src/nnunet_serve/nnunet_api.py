@@ -243,6 +243,10 @@ def get_model_dictionary() -> tuple[dict, dict]:
     return output_model_dictionary, alias_dict
 
 
+def dict_to_str(d: dict) -> str:
+    return ", ".join([f"{k}: {v}" for k, v in d.items()])
+
+
 @dataclass
 class nnUNetAPI:
     app: fastapi.FastAPI | None = None
@@ -442,6 +446,14 @@ class nnUNetAPI:
                 }
 
             model["metadata"] = sd
+            model["description"] = "\n".join(
+                [
+                    "Segmentation model for the following regions:",
+                    *[" - " + dict_to_str(sd[i]) for i in range(len(sd))],
+                    "Uses the following channels:",
+                    dict_to_str(model["model_information"]["channel_names"]),
+                ]
+            )
         return model_dict
 
     def request_params(self):
