@@ -24,13 +24,10 @@ class InferenceRequestBase(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     nnunet_id: str | list[str] = Field(
+        ...,
         description="nnUnet model identifier or list of nnUNet model identifiers.",
-        required=True,
     )
-    output_dir: str = Field(
-        description="Output directory.",
-        required=True,
-    )
+    output_dir: str = Field(..., description="Output directory.")
     class_idx: int | list[int | None] | list[
         list[int] | int | None
     ] | None = Field(
