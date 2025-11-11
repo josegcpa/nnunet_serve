@@ -523,8 +523,16 @@ class nnUNetAPI:
         )
         nnunet_id = params["nnunet_id"]
         if isinstance(nnunet_id, str):
-            if nnunet_id not in self.alias_dict:
-                error_str = f"{nnunet_id} is not a valid nnunet_id"
+            nnunet_id = [nnunet_id]
+
+        nnunet_path = []
+        metadata = []
+        default_args = []
+        is_totalseg = []
+        min_mem = 0
+        for nn in nnunet_id:
+            if nn not in self.alias_dict:
+                error_str = f"{nn} is not a valid nnunet_id"
                 if self.app is None:
                     raise ValueError(error_str)
                 return JSONResponse(
@@ -535,49 +543,18 @@ class nnUNetAPI:
                         "metadata": None,
                         "request": params,
                         "status": FAILURE_STATUS,
-                        "error": f"{nnunet_id} is not a valid nnunet_id",
+                        "error": error_str,
                     },
                     status_code=404,
                 )
-            nnunet_info: dict = self.model_dictionary[
-                self.alias_dict[nnunet_id]
-            ]
-            nnunet_path = nnunet_info["path"]
-            min_mem = nnunet_info.get("min_mem", 4000)
-            default_args = nnunet_info.get("default_args", {})
-            metadata = nnunet_info.get("metadata", None)
-            is_totalseg = nnunet_info.get("is_totalseg", False)
-        else:
-            nnunet_path = []
-            metadata = []
-            default_args = []
-            is_totalseg = []
-            min_mem = 0
-            for nn in nnunet_id:
-                if nn not in self.alias_dict:
-                    error_str = f"{nn} is not a valid nnunet_id"
-                    if self.app is None:
-                        raise ValueError(error_str)
-                    return JSONResponse(
-                        content={
-                            "time_elapsed": None,
-                            "gpu": None,
-                            "nnunet_path": None,
-                            "metadata": None,
-                            "request": params,
-                            "status": FAILURE_STATUS,
-                            "error": error_str,
-                        },
-                        status_code=404,
-                    )
-                nnunet_info = self.model_dictionary[self.alias_dict[nn]]
-                nnunet_path.append(nnunet_info["path"])
-                curr_min_mem = nnunet_info.get("min_mem", 4000)
-                if curr_min_mem > min_mem:
-                    min_mem = curr_min_mem
-                default_args.append(nnunet_info.get("default_args", {}))
-                metadata.append(nnunet_info.get("metadata", None))
-                is_totalseg.append(nnunet_info.get("is_totalseg", False))
+            nnunet_info = self.model_dictionary[self.alias_dict[nn]]
+            nnunet_path.append(nnunet_info["path"])
+            curr_min_mem = nnunet_info.get("min_mem", 4000)
+            if curr_min_mem > min_mem:
+                min_mem = curr_min_mem
+            default_args.append(nnunet_info.get("default_args", {}))
+            metadata.append(nnunet_info.get("metadata", None))
+            is_totalseg.append(nnunet_info.get("is_totalseg", False))
 
         default_params = get_default_params(default_args)
         for k in default_params:
