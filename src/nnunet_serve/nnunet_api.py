@@ -425,6 +425,9 @@ class nnUNetAPI:
             sd = SegWriter.init_from_metadata_dict(
                 model["metadata"]
             ).segment_descriptions
+            model_labels = {
+                v: k for k, v in model["model_information"]["labels"].items()
+            }
             for i in range(len(sd)):
                 try:
                     label = sd[i][0x0062, 0x0005].value
@@ -439,19 +442,19 @@ class nnUNetAPI:
                 except KeyError:
                     laterality = None
                 sd[i] = {
+                    "Label ID": model_labels[i + 1],
+                    "Name": label,
                     "Index": i + 1,
-                    "Label": label,
-                    "Meaning": meaning,
-                    "Laterality": laterality,
                 }
 
             model["metadata"] = sd
             model["description"] = "\n".join(
                 [
                     "Segmentation model for the following regions:",
-                    *[" - " + dict_to_str(sd[i]) for i in range(len(sd))],
+                    *["\t- " + dict_to_str(sd[i]) for i in range(len(sd))],
                     "Uses the following channels:",
-                    dict_to_str(model["model_information"]["channel_names"]),
+                    "\t- "
+                    + dict_to_str(model["model_information"]["channel_names"]),
                 ]
             )
         return model_dict
