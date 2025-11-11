@@ -12,8 +12,6 @@ from typing import List, Union
 import jsonschema
 import pydicom
 
-from pydicom_seg.typing import FSPath
-
 AnyStr = Union[bytes, str]
 FSPath = Union[AnyStr, os.PathLike]
 
