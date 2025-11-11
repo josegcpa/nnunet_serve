@@ -14,11 +14,10 @@ from pathlib import Path
 import highdicom as hd
 import numpy as np
 import pydicom
-import pydicom_seg
 import SimpleITK as sitk
 from pydicom import DataElement
 from pydicom.sr.codedict import Code, codes
-from pydicom_seg.template import rgb_to_cielab
+from nnunet_serve.pydicom_seg_template import rgb_to_cielab, from_dcmqi_metainfo
 from tqdm import tqdm
 
 from nnunet_serve.coding import (
@@ -495,7 +494,7 @@ class SegWriter:
         manufacturer: str = "Algorithm",
         manufacturer_model_name: str = "AlgorithmModel",
     ):
-        metadata = pydicom_seg.template.from_dcmqi_metainfo(metadata_file)
+        metadata = from_dcmqi_metainfo(metadata_file)
         segments = list(metadata.SegmentSequence)
         algorithm_name = segments[0].SegmentAlgorithmName
         algorithm_type = hd.seg.SegmentAlgorithmTypeValues[
