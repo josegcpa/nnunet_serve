@@ -450,7 +450,15 @@ class nnUNetAPI:
             model["metadata"] = sd
             model["description"] = "\n".join(
                 [
-                    "Segmentation model for the following regions:",
+                    "Segments the following regions:",
+                    ", ".join([model_labels[i + 1] for i in range(len(sd))]),
+                    "Number of input channels:",
+                    str(len(model["model_information"]["channel_names"])),
+                ]
+            )
+            model["description_long"] = "\n".join(
+                [
+                    "Segments the following regions:",
                     *["\t- " + dict_to_str(sd[i]) for i in range(len(sd))],
                     "Uses the following channels:",
                     "\t- "
