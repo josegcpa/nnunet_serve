@@ -807,6 +807,8 @@ def single_model_inference(
     if crop_from is not None:
         logger.info("Cropping input")
         logger.info("Input size (before cropping): %s", volumes[0].GetSize())
+        if isinstance(crop_from, str):
+            crop_from = sitk.ReadImage(crop_from)
         crop_from = filter_labels(crop_from, crop_class_idx, True)
         bb, output_padding = get_crop(crop_from, volumes[0], crop_padding)
         volumes = [
