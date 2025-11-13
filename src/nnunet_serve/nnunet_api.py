@@ -643,7 +643,7 @@ class nnUNetAPI:
 
         a = time.time()
         if os.environ.get("DEBUG", "0") == "1":
-            output_paths, identifiers = predict(
+            output_paths, identifiers, is_empty = predict(
                 series_paths=series_paths,
                 metadata=metadata,
                 mirroring=mirroring,
@@ -657,7 +657,7 @@ class nnUNetAPI:
             status = SUCCESS_STATUS
         else:
             try:
-                output_paths, identifiers = predict(
+                output_paths, identifiers, is_empty = predict(
                     series_paths=series_paths,
                     metadata=metadata,
                     mirroring=mirroring,
@@ -690,6 +690,7 @@ class nnUNetAPI:
             "status": status,
             "error": error,
             "identifiers": identifiers,
+            "is_empty": is_empty,
             **output_paths,
         }
         if status == FAILURE_STATUS:

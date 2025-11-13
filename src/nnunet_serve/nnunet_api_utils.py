@@ -522,6 +522,7 @@ def predict(
         raise RuntimeError(f"Inference failed: {e}") from e
 
     identifiers = []
+    is_empty = [pred.sum() == 0 for pred in all_predictions]
 
     try:
         if writing_process_pool:
@@ -555,7 +556,7 @@ def predict(
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return output_paths, identifiers
+    return output_paths, identifiers, is_empty
 
 
 def load_series(series_paths: list[list[str]], is_dicom: bool = False):
