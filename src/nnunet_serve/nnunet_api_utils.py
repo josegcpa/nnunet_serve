@@ -522,7 +522,11 @@ def predict(
         raise RuntimeError(f"Inference failed: {e}") from e
 
     identifiers = []
-    is_empty = [pred.sum() == 0 for pred in all_predictions]
+    label_filter = sitk.LabelShapeStatisticsImageFilter()
+    is_empty = []
+    for pred in all_predictions:
+        label_filter.Execute(pred)
+        is_empty.append(label_filter.GetNumberOfLabels() == 0)
 
     try:
         if writing_process_pool:
