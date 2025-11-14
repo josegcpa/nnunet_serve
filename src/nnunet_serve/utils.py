@@ -307,7 +307,7 @@ def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
                 good_file_paths[acquisition_number] = []
             good_file_paths[acquisition_number].append(dcm_file)
     if len(good_file_paths) == 0:
-        raise RuntimeError("No DICOM files found")
+        raise RuntimeError(f"No DICOM files found in {file_path}")
     good_file_paths = [
         good_file_paths[k] for k in sorted(good_file_paths.keys())
     ][0]
