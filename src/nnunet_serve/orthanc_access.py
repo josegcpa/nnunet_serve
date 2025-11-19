@@ -1,5 +1,6 @@
 import requests
 import os
+from io import BytesIO
 from requests.auth import HTTPBasicAuth
 from zipfile import ZipFile
 
@@ -13,7 +14,23 @@ if ORTHANC_USER and ORTHANC_PASSWORD:
 else:
     AUTH = None
 
+try:
+    requests.get(ORTHANC_URL, auth=AUTH)
+    ORTHANC_AVAILABLE = True
+except requests.exceptions.RequestException as e:
+    ORTHANC_AVAILABLE = False
 
+
+def fail_if_orthanc_not_available(func):
+    def decorator(*args, **kwargs):
+        if not ORTHANC_AVAILABLE:
+            raise ToolError("Orthanc is not available")
+        return func(*args, **kwargs)
+
+    return decorator
+
+
+@fail_if_orthanc_not_available
 def get_all_patients():
     """
     Get all patients from Orthanc.
@@ -26,6 +43,7 @@ def get_all_patients():
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def get_all_studies():
     """
     Get all studies from Orthanc.
@@ -38,6 +56,7 @@ def get_all_studies():
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def get_all_series():
     """
     Get all series from Orthanc.
@@ -50,6 +69,7 @@ def get_all_series():
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def get_series_in_study(study_id: str):
     """
     Get all series in a study from Orthanc.
@@ -67,6 +87,7 @@ def get_series_in_study(study_id: str):
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def get_patient(patient_id: str):
     """
     Get a patient from Orthanc.
@@ -82,6 +103,7 @@ def get_patient(patient_id: str):
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def get_study(study_id: str):
     """
     Get a study from Orthanc.
@@ -97,6 +119,7 @@ def get_study(study_id: str):
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def get_series(series_id: str):
     """
     Get a series from Orthanc.
@@ -112,6 +135,7 @@ def get_series(series_id: str):
     return response.json()
 
 
+@fail_if_orthanc_not_available
 def download_series(series_id: str | list[str], output_dir: str | None = None):
     """
     Download a series from Orthanc.
@@ -122,36 +146,29 @@ def download_series(series_id: str | list[str], output_dir: str | None = None):
             series will be saved in a temporary directory (TMP_STUDY_DIR).
     """
 
-    if isinstance(series_id, list):
+    if isinstance(series_id, str):
         series_id = [series_id]
-
-    response = requests.get(
-        f"{ORTHANC_URL}/series/{series_id}/archive", auth=AUTH
-    )
-    response.raise_for_status()
 
     if output_dir is None:
         output_dir = TMP_STUDY_DIR
-    study_id = get_series(series_id)["ParentStudy"]
-    patient_id = get_study(study_id)["ParentPatient"]
-    real_out_dir = os.path.join(output_dir, patient_id, study_id)
-    os.makedirs(real_out_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     all_paths = {}
     for s_id in series_id:
-        with open(os.path.join(real_out_dir, f"{s_id}.zip"), "wb") as f:
-            f.write(response.content)
+        response = requests.get(
+            f"{ORTHANC_URL}/series/{s_id}/archive", auth=AUTH
+        )
+        response.raise_for_status()
 
-        with ZipFile(os.path.join(real_out_dir, f"{s_id}.zip"), "r") as zip_ref:
-            zip_ref.extractall(real_out_dir)
+        with ZipFile(BytesIO(response.content)) as zip_ref:
+            members = zip_ref.namelist()
+            zip_ref.extractall(output_dir)
 
-        os.remove(os.path.join(real_out_dir, f"{s_id}.zip"))
-
-        all_paths[s_id] = os.path.join(real_out_dir, s_id)
-
+        all_paths[s_id] = os.path.join(output_dir, os.path.dirname(members[0]))
     return all_paths
 
 
+@fail_if_orthanc_not_available
 def upload_instance(instance_path: str):
     """
     Upload an instance to Orthanc.
@@ -166,3 +183,81 @@ def upload_instance(instance_path: str):
     )
     response.raise_for_status()
     return response.json()
+
+
+@fail_if_orthanc_not_available
+def get_series_for_series_uid(series_uid: str):
+    """
+    Returns a dictionary with the series for a given series UID.
+
+    Args:
+        series_uid (str): The series UID.
+
+    Returns:
+        A dictionary with the series for the given series UID.
+    """
+    response = requests.post(
+        f"{ORTHANC_URL}/tools/find",
+        json={
+            "Level": "Series",
+            "Query": {"SeriesInstanceUID": series_uid},
+            "Expand": True,
+        },
+        auth=AUTH,
+    )
+    response.raise_for_status()
+    response_json = response.json()
+    if len(response_json) == 0:
+        return None
+    series = {}
+    for series in response_json:
+        sid = series["ID"]
+        series[sid] = {
+            "series_dicom_tags": series.get("MainDicomTags", {}),
+        }
+    return series
+
+
+@fail_if_orthanc_not_available
+def get_all_series_for_study_uid(study_uid: str):
+    """
+    Returns a dictionary with the series for a given study UID.
+
+    Args:
+        study_uid (str): The study UID.
+
+    Returns:
+        A dictionary with the series for the given study UID.
+    """
+    response = requests.post(
+        f"{ORTHANC_URL}/tools/find",
+        json={
+            "Level": "Studies",
+            "Query": {"StudyInstanceUID": study_uid},
+            "Expand": True,
+        },
+        auth=AUTH,
+    )
+    response.raise_for_status()
+    response_json = response.json()
+    if len(response_json) == 0:
+        return None
+    studies = {}
+    for study in response_json:
+        cid = study["ID"]
+        studies[cid] = {
+            "patient_dicom_tags": study.get("PatientMainDicomTags", {}),
+            "study_dicom_tags": study.get("MainDicomTags", {}),
+            "series": {},
+        }
+        all_series = study.get("Series", [])
+        for sid in all_series:
+            series = get_series(sid)
+            dicom_tags = series.get("MainDicomTags", {})
+            if "ImageOrientationPatient" in dicom_tags:
+                ori = dicom_tags["ImageOrientationPatient"]
+                dicom_tags["ImageOrientationPatient"] = [
+                    float(x) for x in ori.split("\\")
+                ]
+            studies[cid]["series"][sid] = {"series_dicom_tags": dicom_tags}
+    return studies
