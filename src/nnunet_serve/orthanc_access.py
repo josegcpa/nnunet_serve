@@ -1,5 +1,6 @@
 import requests
 import os
+from typing import Any
 from io import BytesIO
 from requests.auth import HTTPBasicAuth
 from zipfile import ZipFile
@@ -182,11 +183,13 @@ def upload_instance(instance_path: str):
         files={"file": open(instance_path, "rb")},
     )
     response.raise_for_status()
-    return response.json()
+    return response.text
 
 
 @fail_if_orthanc_not_available
-def get_series_for_series_uid(series_uid: str):
+def get_series_for_series_uid(
+    series_uid: str,
+) -> dict[str, Any] | None:
     """
     Returns a dictionary with the series for a given series UID.
 
@@ -219,7 +222,9 @@ def get_series_for_series_uid(series_uid: str):
 
 
 @fail_if_orthanc_not_available
-def get_all_series_for_study_uid(study_uid: str):
+def get_all_series_for_study_uid(
+    study_uid: str,
+) -> dict[str, Any] | None:
     """
     Returns a dictionary with the series for a given study UID.
 
