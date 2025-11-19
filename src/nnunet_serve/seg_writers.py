@@ -440,6 +440,13 @@ class SegWriter:
             )
 
         # Create the Segmentation instance
+        label_meanings = [
+            s.SegmentedPropertyTypeCodeSequence[0].meaning
+            for s in segment_descriptions
+        ]
+        seg_series_description = "Seg of " + ", ".join(label_meanings)
+        if len(seg_series_description) > 64:
+            seg_series_description = seg_series_description[:61] + "..."
         if is_fractional:
             seg_type = hd.seg.SegmentationTypeValues.FRACTIONAL
         else:
@@ -457,7 +464,7 @@ class SegWriter:
             manufacturer_model_name=self.manufacturer_model_name,
             software_versions=self.algorithm_version,
             device_serial_number="42",
-            series_description="Segmentation",
+            series_description=seg_series_description,
         )
         seg_dataset.ClinicalTrialSeriesID = self.clinical_trial_series_id
         seg_dataset.ClinicalTrialTimePointID = self.clinical_trial_time_point_id
