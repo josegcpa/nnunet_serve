@@ -4,6 +4,7 @@ from typing import Any
 from io import BytesIO
 from requests.auth import HTTPBasicAuth
 from zipfile import ZipFile
+from fastmcp.exceptions import ToolError
 
 ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://localhost:8042")
 ORTHANC_USER = os.environ.get("ORTHANC_USER", None)
@@ -266,3 +267,75 @@ def get_all_series_for_study_uid(
                 ]
             studies[cid]["series"][sid] = {"series_dicom_tags": dicom_tags}
     return studies
+
+
+@fail_if_orthanc_not_available
+def get_all_studies_for_patient_id(
+    patient_id: str,
+) -> dict[str, Any] | None:
+    response = requests.post(
+        f"{ORTHANC_URL}/tools/find",
+        json={
+            "Level": "Studies",
+            "Query": {"PatientID": patient_id},
+            "Expand": True,
+        },
+        auth=AUTH,
+    )
+    response.raise_for_status()
+    response_json = response.json()
+    if len(response_json) == 0:
+        return None
+    studies = {}
+    for study in response_json:
+        cid = study["ID"]
+        studies[cid] = {
+            "patient_dicom_tags": study.get("PatientMainDicomTags", {}),
+            "study_dicom_tags": study.get("MainDicomTags", {}),
+            "series": {},
+        }
+        all_series = study.get("Series", [])
+        for sid in all_series:
+            series = get_series(sid)
+            dicom_tags = series.get("MainDicomTags", {})
+            if "ImageOrientationPatient" in dicom_tags:
+                ori = dicom_tags["ImageOrientationPatient"]
+                dicom_tags["ImageOrientationPatient"] = [
+                    float(x) for x in ori.split("\\")
+                ]
+            studies[cid]["series"][sid] = {"series_dicom_tags": dicom_tags}
+    return studies
+
+
+def get_series_tags(series_id: str) -> dict[str, Any]:
+    """
+    Returns the tags for the first instance of a given series ID.
+
+    Args:
+        series_id (str): The ID of the series.
+
+    Returns:
+        dict[str, Any]: The tags for the series.
+    """
+    exclude_names = [
+        "AccessionNumber",
+        "InstanceNumber",
+        "DeidentificationMethodCodeSequence",
+        "ClinicalTrialTimePointID",
+        "DeidentificationMethod",
+        "InstanceNumber",
+        "AcquisitionNumber",
+    ]
+    first_instance = get_series(series_id)["Instances"][0]
+    response = requests.get(
+        f"{ORTHANC_URL}/instances/{first_instance}/tags", auth=AUTH
+    )
+    response.raise_for_status()
+    response_json = response.json()
+    output = {}
+    for k in response_json:
+        name = response_json[k]["Name"]
+        if "UID" in name or name in exclude_names:
+            continue
+        output[name] = response_json[k]["Value"]
+    return output
