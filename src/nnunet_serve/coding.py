@@ -1057,6 +1057,7 @@ CATEGORY_MAPPING["EUCAIM"] = {
     "CLIN1063371": "BP1000024",
     "BP1000055": "BP1000024",
     "BP1000096": "BP1000024",
+    "BP1000423": "BP1000024",
 }
 
 NATURAL_LANGUAGE_TO_CODE = {}
@@ -1065,6 +1066,10 @@ NATURAL_LANGUAGE_TO_CODE["EUCAIM"] = {
     "Hepatic flexure": "CLIN1063385",
     "Splenic flexure": "CLIN1063384",
     "Prostate": "BP1000021",
+    "Prostate peripheral zone": "BP1000006",
+    "Prostate central zone": "BP1000168",
+    "Prostate transition zone": "BP1000100",
+    "Prostate central and transition zone": "BP1000423",
     "Prostate gland": "BP1000039",
     "Colon": "CLIN1063722",
     "Cecum": "CLIN1063731",
