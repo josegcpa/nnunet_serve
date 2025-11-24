@@ -522,6 +522,11 @@ def predict(
         raise RuntimeError(f"Inference failed: {e}") from e
 
     identifiers = []
+    label_filter = sitk.LabelShapeStatisticsImageFilter()
+    is_empty = []
+    for pred in all_predictions:
+        label_filter.Execute(pred)
+        is_empty.append(label_filter.GetNumberOfLabels() == 0)
 
     try:
         if writing_process_pool:
@@ -555,7 +560,7 @@ def predict(
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return output_paths, identifiers
+    return output_paths, identifiers, is_empty
 
 
 def load_series(series_paths: list[list[str]], is_dicom: bool = False):
@@ -807,6 +812,8 @@ def single_model_inference(
     if crop_from is not None:
         logger.info("Cropping input")
         logger.info("Input size (before cropping): %s", volumes[0].GetSize())
+        if isinstance(crop_from, str):
+            crop_from = sitk.ReadImage(crop_from)
         crop_from = filter_labels(crop_from, crop_class_idx, True)
         bb, output_padding = get_crop(crop_from, volumes[0], crop_padding)
         volumes = [

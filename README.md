@@ -231,7 +231,7 @@ Refer to `src/nnunet_serve/entrypoints/entrypoint_batch.py` for the full impleme
 
 ### API
 
-This repository includes a FastAPI server that exposes nnU-Net inference as an HTTP API. The server is implemented in `src/nnunet_serve/nnunet_serve.py` and configured by `model-serve-spec.yaml`.
+This repository includes a FastAPI server that exposes nnU-Net inference as an HTTP API. The server is implemented in `src/nnunet_serve/nnunet_serve_api.py` and configured by `model-serve-spec.yaml`.
 
 #### Model caching
 
@@ -245,7 +245,7 @@ Models are cached using a time-to-live cache system, they survive in memory for 
 # optionally set the port via env var (defaults to 12345)
 export NNUNET_SERVE_PORT=12345
 
-uv run uvicorn nnunet_serve.nnunet_serve:create_app \
+uv run uvicorn nnunet_serve.nnunet_serve_api:create_app \
   --host 0.0.0.0 \
   --port ${NNUNET_SERVE_PORT} \
   --reload
@@ -264,7 +264,7 @@ Firstly, users must install [Docker](https://www.docker.com/). **Docker requires
 
 1. Adapt the [`model-serve-spec.yaml`](model-serve-spec.yaml) with your favourite models; this is the blueprint for `model-serve-spec-docker.yaml` (same models but different model directory)
 2. Build the container (`sudo docker build -f Dockerfile . -t nnunet_predict`)
-3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`, as well as the output directory if necessary `-v /data/nnunet:/data/nnunet`): `docker run -it -p 50422:50422 --gpus all -v /models:/models -v /data/nnunet:/data/nnunet nnunet_predict uvicorn nnunet_serve.nnunet_serve:create_app`. This will launch the inference server. When specifying the output directory - if the outputs are not supposed to be kept, we recommend using a Docker volume which can be easily deleted. If the server is running internally, it might be interesting to mount a directory in the computer where outputs are stored.
+3. Run the container while specifying the relevant ports (50422), GPU usage (`--gpus all`), and the model directory (`-v /models:/models`, as well as the output directory if necessary `-v /data/nnunet:/data/nnunet`): `docker run -it -p 50422:50422 --gpus all -v /models:/models -v /data/nnunet:/data/nnunet nnunet_predict uvicorn nnunet_serve.nnunet_serve_api:create_app`. This will launch the inference server. When specifying the output directory - if the outputs are not supposed to be kept, we recommend using a Docker volume which can be easily deleted. If the server is running internally, it might be interesting to mount a directory in the computer where outputs are stored.
 
 #### Endpoints
 

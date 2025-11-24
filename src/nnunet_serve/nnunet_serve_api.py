@@ -77,7 +77,7 @@ def create_app() -> fastapi.FastAPI:
 
 if __name__ == "__main__":
     uvicorn.run(
-        "nnunet_serve.nnunet_serve:create_app",
+        "nnunet_serve.nnunet_serve_api:create_app",
         host="0.0.0.0",
         port=PORT,
         reload=True,

@@ -425,6 +425,9 @@ class nnUNetAPI:
             sd = SegWriter.init_from_metadata_dict(
                 model["metadata"]
             ).segment_descriptions
+            model_labels = {
+                v: k for k, v in model["model_information"]["labels"].items()
+            }
             for i in range(len(sd)):
                 try:
                     label = sd[i][0x0062, 0x0005].value
@@ -439,19 +442,27 @@ class nnUNetAPI:
                 except KeyError:
                     laterality = None
                 sd[i] = {
+                    "Label ID": model_labels[i + 1],
+                    "Name": label,
                     "Index": i + 1,
-                    "Label": label,
-                    "Meaning": meaning,
-                    "Laterality": laterality,
                 }
 
             model["metadata"] = sd
             model["description"] = "\n".join(
                 [
-                    "Segmentation model for the following regions:",
-                    *[" - " + dict_to_str(sd[i]) for i in range(len(sd))],
+                    "Segments the following regions:",
+                    ", ".join([model_labels[i + 1] for i in range(len(sd))]),
+                    "Number of input channels:",
+                    str(len(model["model_information"]["channel_names"])),
+                ]
+            )
+            model["description_long"] = "\n".join(
+                [
+                    "Segments the following regions:",
+                    *["\t- " + dict_to_str(sd[i]) for i in range(len(sd))],
                     "Uses the following channels:",
-                    dict_to_str(model["model_information"]["channel_names"]),
+                    "\t- "
+                    + dict_to_str(model["model_information"]["channel_names"]),
                 ]
             )
         return model_dict
@@ -520,8 +531,16 @@ class nnUNetAPI:
         )
         nnunet_id = params["nnunet_id"]
         if isinstance(nnunet_id, str):
-            if nnunet_id not in self.alias_dict:
-                error_str = f"{nnunet_id} is not a valid nnunet_id"
+            nnunet_id = [nnunet_id]
+
+        nnunet_path = []
+        metadata = []
+        default_args = []
+        is_totalseg = []
+        min_mem = 0
+        for nn in nnunet_id:
+            if nn not in self.alias_dict:
+                error_str = f"{nn} is not a valid nnunet_id"
                 if self.app is None:
                     raise ValueError(error_str)
                 return JSONResponse(
@@ -532,49 +551,18 @@ class nnUNetAPI:
                         "metadata": None,
                         "request": params,
                         "status": FAILURE_STATUS,
-                        "error": f"{nnunet_id} is not a valid nnunet_id",
+                        "error": error_str,
                     },
                     status_code=404,
                 )
-            nnunet_info: dict = self.model_dictionary[
-                self.alias_dict[nnunet_id]
-            ]
-            nnunet_path = nnunet_info["path"]
-            min_mem = nnunet_info.get("min_mem", 4000)
-            default_args = nnunet_info.get("default_args", {})
-            metadata = nnunet_info.get("metadata", None)
-            is_totalseg = nnunet_info.get("is_totalseg", False)
-        else:
-            nnunet_path = []
-            metadata = []
-            default_args = []
-            is_totalseg = []
-            min_mem = 0
-            for nn in nnunet_id:
-                if nn not in self.alias_dict:
-                    error_str = f"{nn} is not a valid nnunet_id"
-                    if self.app is None:
-                        raise ValueError(error_str)
-                    return JSONResponse(
-                        content={
-                            "time_elapsed": None,
-                            "gpu": None,
-                            "nnunet_path": None,
-                            "metadata": None,
-                            "request": params,
-                            "status": FAILURE_STATUS,
-                            "error": error_str,
-                        },
-                        status_code=404,
-                    )
-                nnunet_info = self.model_dictionary[self.alias_dict[nn]]
-                nnunet_path.append(nnunet_info["path"])
-                curr_min_mem = nnunet_info.get("min_mem", 4000)
-                if curr_min_mem > min_mem:
-                    min_mem = curr_min_mem
-                default_args.append(nnunet_info.get("default_args", {}))
-                metadata.append(nnunet_info.get("metadata", None))
-                is_totalseg.append(nnunet_info.get("is_totalseg", False))
+            nnunet_info = self.model_dictionary[self.alias_dict[nn]]
+            nnunet_path.append(nnunet_info["path"])
+            curr_min_mem = nnunet_info.get("min_mem", 4000)
+            if curr_min_mem > min_mem:
+                min_mem = curr_min_mem
+            default_args.append(nnunet_info.get("default_args", {}))
+            metadata.append(nnunet_info.get("metadata", None))
+            is_totalseg.append(nnunet_info.get("is_totalseg", False))
 
         default_params = get_default_params(default_args)
         for k in default_params:
@@ -655,7 +643,7 @@ class nnUNetAPI:
 
         a = time.time()
         if os.environ.get("DEBUG", "0") == "1":
-            output_paths, identifiers = predict(
+            output_paths, identifiers, is_empty = predict(
                 series_paths=series_paths,
                 metadata=metadata,
                 mirroring=mirroring,
@@ -669,7 +657,7 @@ class nnUNetAPI:
             status = SUCCESS_STATUS
         else:
             try:
-                output_paths, identifiers = predict(
+                output_paths, identifiers, is_empty = predict(
                     series_paths=series_paths,
                     metadata=metadata,
                     mirroring=mirroring,
@@ -688,6 +676,7 @@ class nnUNetAPI:
             except Exception as e:
                 output_paths = {}
                 identifiers = []
+                is_empty = []
                 status = FAILURE_STATUS
                 error = str(e)
         if torch.cuda.is_available():
@@ -702,6 +691,7 @@ class nnUNetAPI:
             "status": status,
             "error": error,
             "identifiers": identifiers,
+            "is_empty": is_empty,
             **output_paths,
         }
         if status == FAILURE_STATUS:

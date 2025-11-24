@@ -7,7 +7,6 @@ authors = [
 ]
 dependencies = [
     "pydicom>=3",
-    "pydicom-seg>=0.4.1",
     "SimpleITK>=2.3.1",
     "nnunetv2>=2.2.1",
     "pydantic>=2.12.2",
@@ -25,6 +24,7 @@ dependencies = [
     "torch>=2.9.0",
     "python-multipart>=0.0.20",
     "cachetools>=6.2.1",
+    "fastmcp==2.13",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -35,7 +35,6 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-pydicom-seg = { git = "https://github.com/josegcpa/pydicom-seg", rev = "75a1b025f2a3297e1704ae135371bfd5ce631935" }
 totalsegmentator = { git = "https://github.com/wasserth/TotalSegmentator" }
 
 [project.scripts]

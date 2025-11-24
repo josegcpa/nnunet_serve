@@ -5,7 +5,6 @@ Minimal utilities for logging.
 import logging
 import os
 from pathlib import Path
-from logging.handlers import RotatingFileHandler
 
 LOGS_DIR = os.environ.get("LOGS_DIR", "./logs")
 
