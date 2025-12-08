@@ -22,6 +22,7 @@ from tqdm import tqdm
 
 from nnunet_serve.coding import (
     CATEGORY_MAPPING,
+    CATEGORY_CONCEPTS,
     CODING_SCHEME_INFORMATION,
     CODING_SCHEME_INFORMATION_VR,
     LATERALITY_CODING,
@@ -315,7 +316,7 @@ class SegWriter:
             raise ValueError(
                 "Either segment_descriptions or segment_names must be provided"
             )
-        category_concepts = codes.CID7150.concepts
+        category_concepts = CATEGORY_CONCEPTS[DEFAULT_SEGMENT_SCHEME]
         self.algorithm_identification = hd.AlgorithmIdentificationSequence(
             name=self.algorithm_name,
             version=self.algorithm_version,
