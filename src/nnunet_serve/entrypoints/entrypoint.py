@@ -17,7 +17,9 @@ from nnunet_serve.nnunet_api import nnUNetAPI
 from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
 from nnunet_serve.api_datamodels import InferenceRequest
 from nnunet_serve.utils import make_parser
-from nnunet_serve.logging_utils import add_file_handler_to_manager
+from nnunet_serve.logging_utils import add_file_handler_to_manager, get_logger
+
+logger = get_logger(__name__)
 
 
 def main_with_args(args):
@@ -78,8 +80,12 @@ def main_with_args(args):
     ]:
         if k in response:
             final_prediction = response[k][-1]
+            if final_prediction is None:
+                continue
             name = Path(final_prediction).name
-            shutil.copy(final_prediction, os.path.join(args.output_dir, name))
+            final_out = os.path.join(args.output_dir, name)
+            logger.info(f"{k}: copying {final_prediction} to {final_out}")
+            shutil.copy(final_prediction, final_out)
             response[f"{k}_final"] = name
     del response["metadata"]
     return response
