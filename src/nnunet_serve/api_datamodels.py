@@ -96,7 +96,7 @@ class InferenceRequestBase(BaseModel):
             self.__pydantic_fields_set__.remove(field)
 
     def model_post_init(self, context):
-        if isinstance(self.proba_threshold, float):
+        if isinstance(self.proba_threshold, list) is False:
             self.proba_threshold = [self.proba_threshold]
         if self.save_proba_map and all(
             [x is None for x in self.proba_threshold]
