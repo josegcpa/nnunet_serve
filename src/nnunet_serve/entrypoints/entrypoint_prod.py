@@ -4,7 +4,9 @@ import time
 
 import requests
 
-from nnunet_serve.entrypoints.entrypoint import main_with_args
+from nnunet_serve.entrypoints.entrypoint import (
+    main_with_args as main_with_args_entrypoint,
+)
 from nnunet_serve.utils import make_parser
 from nnunet_serve.logging_utils import get_logger
 
@@ -34,7 +36,7 @@ def main_with_args(args):
     if "SERIES_PATHS" in os.environ:
         args.series_paths = os.environ["SERIES_PATHS"].split(" ")
 
-    main_with_args(args)
+    main_with_args_entrypoint(args)
 
     timer.print_time()
 
