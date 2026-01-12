@@ -2,7 +2,7 @@
 model_folder: /usr/backups/models/nnunet/
 load_timeout_min: 60
 models:
-  - id: prostate_whole_gland
+  - id: prostate_whole_gland_mri
     rel_path: prostate_whole_gland_model
     name: "Prostate whole gland segmentation"
     # file containing metadata for DICOM-seg output
@@ -17,7 +17,7 @@ models:
       use_folds: [0, 1, 2, 3, 4]
       tta: false
       checkpoint_name: "checkpoint_best.pth"
-  - id: prostate_zone
+  - id: prostate_zone_mri
     rel_path: prostate_zone_model
     name: "Prostate zone segmentation model"
     aliases: [prostate_zones]
@@ -29,7 +29,7 @@ models:
       use_folds: [0, 1, 2, 3, 4]
       tta: false
       checkpoint_name: "checkpoint_best.pth"
-  - id: prostate_aggressive_lesion
+  - id: prostate_aggressive_lesion_mri
     rel_path: prostate_aggressive_lesion_model
     name: "Prostate aggressive lesion detection model"
     aliases: [aggressive_lesion]
@@ -65,7 +65,7 @@ models:
       checkpoint_name: "checkpoint_final.pth"
       class_idx: 1
       proba_threshold: null
-  - id: organ_ct_verbose
+  - id: verbose_organ_ct
     rel_path: Dataset291_TotalSegmentator_part1_organs_1559subj
     name: "Organ CT segmentation model (from TotalSegmentator)"
     is_totalseg: true
@@ -111,13 +111,13 @@ models:
       use_folds: [0]
       checkpoint_name: "checkpoint_final.pth"
       proba_threshold: null
-  - id: total_ct
-    totalseg_task: "total_fastest"
+  - id: total_fast_ct
+    totalseg_task: "total_fast"
   - id: organ_ct
     totalseg_task: "organ_ct"
-  - id: liver_segments
+  - id: hepatic_couinaud_segments_ct
     totalseg_task: "liver_segments"
-  - id: hcc_arterial
+  - id: hcc_arterial_ct
     rel_path: hcc_arterial
     name: "HCC arterial phase segmentation model"
     metadata:
