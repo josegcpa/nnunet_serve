@@ -392,6 +392,15 @@ class SegWriter:
             mask = sitk.GetArrayFromImage(mask)
         return mask
 
+    def make_compliant(self, f):
+        if hasattr(f, "PatientSex") is False:
+            f.PatientSex = "O"
+        if hasattr(f, "AccessionNumber") is False:
+            f.AccessionNumber = ""
+        if hasattr(f, "StudyID") is False:
+            f.StudyID = ""
+        return f
+
     def write_dicom_seg(
         self,
         mask_array: np.ndarray | sitk.Image,
@@ -400,24 +409,29 @@ class SegWriter:
         is_fractional: bool = False,
     ):
         mask_array = self.to_array_if_necessary(mask_array)[::-1, :, :]
-        # adjust array size and segment descriptions to the scritly necessary
+        # adjust array size and segment descriptions to the strictly necessary
         labels = np.unique(mask_array)
         labels = labels[labels > 0]
         if len(labels) == 0:
-            logging.warning("Mask is empty")
+            logger.warning("Mask is empty")
             return "empty"
         label_dict = {label: i + 1 for i, label in enumerate(labels)}
         label_dict[0] = 0
         mask_array = np.vectorize(label_dict.get)(mask_array)
         segment_descriptions = []
-        for i, label in enumerate(labels):
-            seg_d = deepcopy(self.segment_descriptions[label - 1])
-            seg_d.SegmentNumber = i + 1
-            segment_descriptions.append(seg_d)
+        if is_fractional is False:
+            for i, label in enumerate(labels.astype(int)):
+                seg_d = deepcopy(self.segment_descriptions[label - 1])
+                seg_d.SegmentNumber = i + 1
+                segment_descriptions.append(seg_d)
+        else:
+            segment_descriptions = self.segment_descriptions
 
         if len(mask_array.shape) != 4:
             mask_array = one_hot_encode(mask_array, len(segment_descriptions))
-        image_datasets = [hd.imread(str(f)) for f in source_files]
+        image_datasets = [
+            self.make_compliant(hd.imread(str(f))) for f in source_files
+        ]
 
         if hasattr(image_datasets[0], "InstanceNumber"):
             image_datasets = sorted(
@@ -594,14 +608,17 @@ def export_predictions(
     if save_nifti_inputs is True:
         niftis = []
         for i, volume_set in enumerate(volumes):
-            for volume in volume_set:
+            for j, volume in enumerate(volume_set):
                 output_nifti_path = os.path.join(
-                    stage_dirs[i], "input_volume.nii.gz"
+                    stage_dirs[i], f"input_volume_{j}.nii.gz"
                 )
                 sitk.WriteImage(volume, output_nifti_path)
                 niftis.append(output_nifti_path)
                 logger.info(
-                    "Exported input volume %d to %s", i, output_nifti_path
+                    "Exported input volume %d to %s for stage %d",
+                    j,
+                    output_nifti_path,
+                    i,
                 )
         output_paths["nifti_inputs"] = niftis
 
@@ -619,6 +636,8 @@ def export_predictions(
             )
             if "empty" in status:
                 logger.info("Mask %d is empty, skipping DICOMseg/RTstruct", i)
+                dicom_seg_paths.append(None)
+                dicom_struct_paths.append(None)
             elif save_rt_struct_output:
                 dcm_rts_output_path = (
                     f"{stage_dirs[i]}/{output_names['struct']}.dcm"
@@ -650,12 +669,18 @@ def export_predictions(
                 output_path = (
                     f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
                 )
-                seg_writers[i].write_dicom_seg(
+                status = seg_writers[i].write_dicom_seg(
                     proba_map,
                     source_files=good_file_paths[0],
                     output_path=output_path,
                     is_fractional=True,
                 )
+                if status == "empty":
+                    dicom_proba_paths.append(None)
+                    logger.info(
+                        f"Mask {i} is empty, skipping DICOM probabilities."
+                    )
+                    continue
                 dicom_proba_paths.append(output_path)
                 logger.info(
                     "Exported DICOM fractional segmentation %d to %s",
@@ -664,6 +689,7 @@ def export_predictions(
                 )
             output_paths["dicom_fractional_segmentation"] = dicom_proba_paths
 
+    logger.info("Finished exporting predictions")
     return output_paths
 
 
