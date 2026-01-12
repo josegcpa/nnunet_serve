@@ -555,6 +555,7 @@ def predict(
                 seg_writers=seg_writers,
                 **export_params,
             )
+            logger.info("Finished exporting predictions")
     except Exception as e:
         raise RuntimeError(f"Failed to export predictions: {e}") from e
 
@@ -581,7 +582,7 @@ def load_series(series_paths: list[list[str]], is_dicom: bool = False):
     for i, series_path in enumerate(series_paths):
         if len(series_path) > 1:
             # resample to first using unique_volumes
-            curr_volumes = [unique_volumes[s]] + [
+            curr_volumes = [unique_volumes[series_path[0]]] + [
                 resample_image_to_target(
                     unique_volumes[s], unique_volumes[series_path[0]]
                 )
@@ -856,8 +857,8 @@ def single_model_inference(
         mask_array = mask_array[..., ::-1, ::-1]
         proba_array = proba_array[..., ::-1, ::-1]
     logger.info("Removing small objects")
-    mask_array = remove_small_objects(mask_array, 0.8)
-    proba_array = proba_array * (mask_array[None] > 1)
+    mask_array = remove_small_objects(mask_array, 0.5)
+    proba_array = proba_array * (mask_array[None] > 0.5)
 
     logger.info("nnUNet: inference done")
 
