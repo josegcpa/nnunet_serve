@@ -162,7 +162,7 @@ def filter_by_bvalue(
     return dicom_files
 
 
-def remove_small_objects(
+def small_object_removal(
     image: np.ndarray, min_size: float | int = 0.99
 ) -> np.ndarray:
     """

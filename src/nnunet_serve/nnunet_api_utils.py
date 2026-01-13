@@ -32,7 +32,7 @@ from nnunet_serve.utils import (
     extract_lesion_candidates,
     intersect,
     read_dicom_as_sitk,
-    remove_small_objects,
+    small_object_removal,
     wait_for_gpu,
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
@@ -731,6 +731,7 @@ def single_model_inference(
     crop_class_idx: int = 1,
     crop_padding: tuple[int, int, int] | None = None,
     min_intersection: float = 0.1,
+    remove_objects_smaller_than: float | None = None,
     flip_xy: bool = False,
     min_mem: int | None = None,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
@@ -772,6 +773,9 @@ def single_model_inference(
             intersect with ``intersect_with``. Defaults to 0.1.
         prediction_name (str | None, optional): name of the prediction. Defaults
             to None.
+        remove_objects_smaller_than (float | None, optional): whether to remove
+            objects smaller than this threshold. If a float is provided, it is
+            considered as a percentage of the maximum object size. Defaults to None.
         flip_xy (bool, optional): whether to flip the x and y axes of the input.
             TotalSegmentator does this for some reason. Defaults to False.
         min_mem (int | None, optional): minimum amount of free memory required to
@@ -857,7 +861,10 @@ def single_model_inference(
         mask_array = mask_array[..., ::-1, ::-1]
         proba_array = proba_array[..., ::-1, ::-1]
     logger.info("Removing small objects")
-    mask_array = remove_small_objects(mask_array, 0.5)
+    if remove_objects_smaller_than is not None:
+        mask_array = small_object_removal(
+            mask_array, remove_objects_smaller_than
+        )
     proba_array = proba_array * (mask_array[None] > 0.5)
 
     logger.info("nnUNet: inference done")
@@ -955,6 +962,9 @@ def multi_model_inference(
     crop_from: str | sitk.Image | None = None,
     crop_padding: tuple[int, int, int] | None = None,
     cascade_mode: str | list[str] = "intersect",
+    remove_objects_smaller_than: (
+        float | tuple[float] | list[float] | None
+    ) = None,
     flip_xy: bool = False,
     min_mem: int | None = None,
 ):
@@ -993,6 +1003,9 @@ def multi_model_inference(
             added to the cropped region. Defaults to None.
         cascade_mode (str | list[str], optional): whether to crop inputs to consecutive
             bounding boxes or to intersect consecutive outputs. Defaults to "intersect".
+        remove_objects_smaller_than (float | tuple[float] | list[float] | None, optional):
+            whether to remove objects smaller than this threshold. If a float is provided,
+            it is considered as a percentage of the maximum object size. Defaults to None.
         flip_xy (bool, optional): whether to flip the x and y axes of the input.
             TotalSegmentator does this for some reason. Defaults to False.
         min_mem (int | None, optional): minimum amount of free memory required to
@@ -1031,6 +1044,9 @@ def multi_model_inference(
             class_idx_list = class_idx
         proba_threshold = coherce_to_list(proba_threshold, len(nnunet_path))
         min_confidence = coherce_to_list(min_confidence, len(nnunet_path))
+        remove_objects_smaller_than = coherce_to_list(
+            remove_objects_smaller_than, len(nnunet_path)
+        )
         checkpoint_name_list = coherce_to_list(
             checkpoint_name, len(nnunet_path)
         )
@@ -1078,6 +1094,7 @@ def multi_model_inference(
                 crop_from=crop_from,
                 crop_class_idx=crop_class_idx,
                 crop_padding=crop_padding,
+                remove_objects_smaller_than=remove_objects_smaller_than[i],
                 flip_xy=flip_xy[i],
                 min_mem=min_mem,
             )
@@ -1116,6 +1133,7 @@ def multi_model_inference(
             min_intersection=min_intersection,
             crop_from=crop_from,
             crop_padding=crop_padding,
+            remove_objects_smaller_than=remove_objects_smaller_than,
             flip_xy=flip_xy,
             min_mem=min_mem,
         )

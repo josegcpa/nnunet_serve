@@ -68,6 +68,12 @@ class InferenceRequestBase(BaseModel):
         description="Padding to be added to the cropped region.",
         default=(10, 10, 10),
     )
+    remove_objects_smaller_than: float | list[float | None] | None = Field(
+        description="Remove objects smaller than this threshold. "
+        "If a float is provided, it is considered as a percentage of the "
+        "maximum object size.",
+        default=None,
+    )
     cascade_mode: CascadeMode | list[CascadeMode] = Field(
         description="Whether to crop inputs to consecutive bounding boxes "
         "or to intersect consecutive outputs.",
