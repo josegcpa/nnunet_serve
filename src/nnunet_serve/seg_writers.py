@@ -455,10 +455,14 @@ class SegWriter:
             )
 
         # Create the Segmentation instance
-        label_meanings = [
-            s.SegmentedPropertyTypeCodeSequence[0].meaning
-            for s in segment_descriptions
-        ]
+        label_meanings = []
+        for s in segment_descriptions:
+            ss = s.SegmentedPropertyTypeCodeSequence[0]
+            if isinstance(ss, pydicom.Dataset):
+                meaning = ss.CodeMeaning
+            else:
+                meaning = ss.meaning
+            label_meanings.append(meaning)
         seg_series_description = "Seg of " + ", ".join(label_meanings)
         if len(seg_series_description) > 64:
             seg_series_description = seg_series_description[:61] + "..."
