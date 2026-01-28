@@ -293,6 +293,38 @@ def get_contiguous_arr_idxs(
     return output_segment_idxs
 
 
+def sort_dicom_slices(file_paths: list[str]) -> list[str]:
+    if len(file_paths) <= 1:
+        return file_paths
+    try:
+        first = dcmread(file_paths[0], stop_before_pixels=True)
+        if (0x0020, 0x0037) in first and (0x0020, 0x0032) in first:
+            iop = np.array(first[0x0020, 0x0037].value, dtype=float)
+            row = iop[:3]
+            col = iop[3:]
+            normal = np.cross(row, col)
+
+            positions = []
+            for p in file_paths:
+                ds = dcmread(p, stop_before_pixels=True)
+                ipp = np.array(ds[0x0020, 0x0032].value, dtype=float)
+                positions.append(float(np.dot(ipp, normal)))
+            order = np.argsort(np.array(positions))
+            return [file_paths[i] for i in order]
+    except Exception:
+        pass
+
+    try:
+        instance_numbers = []
+        for p in file_paths:
+            ds = dcmread(p, stop_before_pixels=True)
+            instance_numbers.append(int(getattr(ds, "InstanceNumber")))
+        order = np.argsort(np.array(instance_numbers))
+        return [file_paths[i] for i in order]
+    except Exception:
+        return file_paths
+
+
 def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
     reader = sitk.ImageSeriesReader()
     dicom_file_names = reader.GetGDCMSeriesFileNames(file_path)
@@ -311,6 +343,7 @@ def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
     good_file_paths = [
         good_file_paths[k] for k in sorted(good_file_paths.keys())
     ][0]
+    good_file_paths = sort_dicom_slices(good_file_paths)
     reader.SetFileNames(good_file_paths)
 
     sitk_image: sitk.Image = reader.Execute()

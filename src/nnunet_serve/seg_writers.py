@@ -408,7 +408,18 @@ class SegWriter:
         output_path: str,
         is_fractional: bool = False,
     ):
-        mask_array = self.to_array_if_necessary(mask_array)[::-1, :, :]
+        """
+        Writes a DICOM segmentation file.
+
+        Args:
+            mask_array (np.ndarray | sitk.Image): the mask array or sitk image.
+            source_files (list[str]): the list of DICOM source files (as returned
+                by ``nnunet_serve.utils.read_dicom_as_sitk``).
+            output_path (str): the output path.
+            is_fractional (bool, optional): whether the mask is fractional.
+                Defaults to False.
+        """
+        mask_array = self.to_array_if_necessary(mask_array)
         # adjust array size and segment descriptions to the strictly necessary
         labels = np.unique(mask_array)
         labels = labels[labels > 0]
@@ -432,15 +443,6 @@ class SegWriter:
         image_datasets = [
             self.make_compliant(hd.imread(str(f))) for f in source_files
         ]
-
-        if hasattr(image_datasets[0], "InstanceNumber"):
-            image_datasets = sorted(
-                image_datasets, key=lambda x: x.InstanceNumber
-            )
-        elif hasattr(image_datasets[0], "ImagePositionPatient"):
-            image_datasets = sorted(
-                image_datasets, key=lambda x: float(x.ImagePositionPatient[2])
-            )
 
         first = image_datasets[0]
         rows, cols = int(getattr(first, "Rows")), int(getattr(first, "Columns"))
