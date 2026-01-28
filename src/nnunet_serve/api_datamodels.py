@@ -98,7 +98,7 @@ class InferenceRequestBase(BaseModel):
         if field in self.__pydantic_fields_set__:
             is_set = True
         self.__setattr__(field, value)
-        if is_set is True:
+        if is_set is False:
             self.__pydantic_fields_set__.remove(field)
 
     def model_post_init(self, context):
