@@ -103,7 +103,9 @@ class InferenceRequestBase(BaseModel):
 
     def model_post_init(self, context):
         if isinstance(self.proba_threshold, list) is False:
-            self.proba_threshold = [self.proba_threshold]
+            self.__internal_update_field(
+                "proba_threshold", [self.proba_threshold]
+            )
         if self.save_proba_map and all(
             [x is None for x in self.proba_threshold]
         ):
@@ -111,9 +113,11 @@ class InferenceRequestBase(BaseModel):
                 "proba_threshold must be not-None if save_proba_map is True"
             )
         if isinstance(self.checkpoint_name, list) is False:
-            self.checkpoint_name = [self.checkpoint_name]
+            self.__internal_update_field(
+                "checkpoint_name", self.checkpoint_name
+            )
         if isinstance(self.cascade_mode, list) is False:
-            self.cascade_mode = [self.cascade_mode]
+            self.__internal_update_field("cascade_mode", self.cascade_mode)
 
 
 class InferenceRequest(InferenceRequestBase):
