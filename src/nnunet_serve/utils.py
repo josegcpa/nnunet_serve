@@ -315,6 +315,7 @@ def sort_dicom_slices(file_paths: list[str]) -> list[str]:
         pass
 
     try:
+        logger.info("Sorting slices by InstanceNumber")
         instance_numbers = []
         for p in file_paths:
             ds = dcmread(p, stop_before_pixels=True)
