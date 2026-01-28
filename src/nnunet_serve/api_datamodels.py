@@ -114,10 +114,10 @@ class InferenceRequestBase(BaseModel):
             )
         if isinstance(self.checkpoint_name, list) is False:
             self.__internal_update_field(
-                "checkpoint_name", self.checkpoint_name
+                "checkpoint_name", [self.checkpoint_name]
             )
         if isinstance(self.cascade_mode, list) is False:
-            self.__internal_update_field("cascade_mode", self.cascade_mode)
+            self.__internal_update_field("cascade_mode", [self.cascade_mode])
 
 
 class InferenceRequest(InferenceRequestBase):
