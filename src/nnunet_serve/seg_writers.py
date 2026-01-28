@@ -29,6 +29,7 @@ from nnunet_serve.coding import (
     NATURAL_LANGUAGE_TO_CODE,
 )
 from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.utils import sort_dicom_slices
 from nnunet_serve.str_processing import get_laterality, to_camel_case
 
 logger = get_logger(__name__)
@@ -420,6 +421,16 @@ class SegWriter:
                 Defaults to False.
         """
         mask_array = self.to_array_if_necessary(mask_array)
+        sorted_source_files = sort_dicom_slices(list(source_files))
+        if sorted_source_files != list(source_files):
+            idx_map = {p: i for i, p in enumerate(source_files)}
+            try:
+                order = [idx_map[p] for p in sorted_source_files]
+            except KeyError:
+                order = None
+            if order is not None:
+                mask_array = mask_array[order, ...]
+            source_files = sorted_source_files
         # adjust array size and segment descriptions to the strictly necessary
         labels = np.unique(mask_array)
         labels = labels[labels > 0]

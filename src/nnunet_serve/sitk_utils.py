@@ -142,7 +142,12 @@ def from_closest_canonical_sitk(
             from_closest_canonical_sitk(i, o)
             for i, o in zip(canonical_img, original_img)
         ]
-    original_direction = np.array(original_img[0].GetDirection()).reshape(3, 3)
+    if isinstance(original_img, list):
+        original_ref = original_img[0]
+    else:
+        original_ref = original_img
+
+    original_direction = np.array(original_ref.GetDirection()).reshape(3, 3)
     canonical_direction = np.eye(3)
 
     flip_axes = [
@@ -157,7 +162,7 @@ def from_closest_canonical_sitk(
             restored_img, [axis == i for i in range(3)], False
         )
 
-    restored_img.SetDirection(tuple(original_direction.flatten()))
+    restored_img.CopyInformation(original_ref)
     return restored_img
 
 
