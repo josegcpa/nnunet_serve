@@ -296,34 +296,13 @@ def get_contiguous_arr_idxs(
 def sort_dicom_slices(file_paths: list[str]) -> list[str]:
     if len(file_paths) <= 1:
         return file_paths
-    try:
-        first = dcmread(file_paths[0], stop_before_pixels=True)
-        if (0x0020, 0x0037) in first and (0x0020, 0x0032) in first:
-            iop = np.array(first[0x0020, 0x0037].value, dtype=float)
-            row = iop[:3]
-            col = iop[3:]
-            normal = np.cross(row, col)
 
-            positions = []
-            for p in file_paths:
-                ds = dcmread(p, stop_before_pixels=True)
-                ipp = np.array(ds[0x0020, 0x0032].value, dtype=float)
-                positions.append(float(np.dot(ipp, normal)))
-            order = np.argsort(np.array(positions))
-            return [file_paths[i] for i in order]
-    except Exception:
-        pass
-
-    try:
-        logger.info("Sorting slices by InstanceNumber")
-        instance_numbers = []
-        for p in file_paths:
-            ds = dcmread(p, stop_before_pixels=True)
-            instance_numbers.append(int(getattr(ds, "InstanceNumber")))
-        order = np.argsort(np.array(instance_numbers))
-        return [file_paths[i] for i in order]
-    except Exception:
-        return file_paths
+    instance_numbers = []
+    for p in file_paths:
+        ds = dcmread(p, stop_before_pixels=True)
+        instance_numbers.append(int(getattr(ds, "InstanceNumber")))
+    order = np.argsort(np.array(instance_numbers))
+    return [file_paths[i] for i in order]
 
 
 def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
