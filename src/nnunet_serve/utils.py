@@ -5,11 +5,14 @@ General utilities.
 import argparse
 import subprocess as sp
 import time
+import os
 from typing import Sequence
 from glob import glob
 
 import numpy as np
 import SimpleITK as sitk
+import pydicom
+from pydicom_seg import MultiClassReader
 from pydicom import dcmread
 from scipy import ndimage
 
@@ -331,6 +334,23 @@ def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
     for k in metadata:
         sitk_image.SetMetaData(k, metadata[k])
     return sitk_image, good_file_paths
+
+
+def read_dicom_seg_as_volume(path: str) -> sitk.Image:
+    if os.path.isdir(path):
+        path = glob(os.path.join(path, "*"))
+        if len(path) > 1:
+            raise ValueError(
+                "The downloaded segmentation series contains more than one file"
+            )
+        path = path[0]
+    image = pydicom.dcmread(path)
+    assert (
+        image.SOPClassUID == "1.2.840.10008.5.1.4.1.1.66.4"
+    ), f"Expected SOPClassUID 1.2.840.10008.5.1.4.1.1.66.4, got {image.SOPClassUID}"
+    reader = MultiClassReader()
+    result = reader.read(image)
+    return result.image
 
 
 def get_study_uid(dicom_dir: str) -> str:
