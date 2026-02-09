@@ -5,7 +5,6 @@ General utilities.
 import argparse
 import subprocess as sp
 import time
-import os
 from typing import Sequence
 from glob import glob
 
