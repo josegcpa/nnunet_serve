@@ -15,6 +15,7 @@ import highdicom as hd
 import numpy as np
 import pydicom
 import SimpleITK as sitk
+from matplotlib import colormaps
 from pydicom import DataElement
 from pydicom.sr.codedict import Code, codes
 from nnunet_serve.pydicom_seg_template import rgb_to_cielab, from_dcmqi_metainfo
@@ -35,6 +36,7 @@ from nnunet_serve.str_processing import get_laterality, to_camel_case
 logger = get_logger(__name__)
 
 DEFAULT_SEGMENT_SCHEME = os.environ.get("DEFAULT_SEGMENT_SCHEME", "SCT")
+N_FRACTIONAL = 10
 
 
 def strip_laterality(name: str) -> str:
@@ -408,6 +410,7 @@ class SegWriter:
         source_files: list[str],
         output_path: str,
         is_fractional: bool = False,
+        is_fractional_compliant: bool = False,
     ):
         """
         Writes a DICOM segmentation file.
@@ -419,6 +422,9 @@ class SegWriter:
             output_path (str): the output path.
             is_fractional (bool, optional): whether the mask is fractional.
                 Defaults to False.
+            is_fractional_compliant (bool, optional): whether the probability mask
+                should be converted to a map with ``N_FRACTIONAL`` labels,
+                each corresponding to a percentage.
         """
         mask_array = self.to_array_if_necessary(mask_array)
         sorted_source_files = sort_dicom_slices(list(source_files))
@@ -441,7 +447,7 @@ class SegWriter:
         label_dict[0] = 0
         mask_array = np.vectorize(label_dict.get)(mask_array)
         segment_descriptions = []
-        if is_fractional is False:
+        if is_fractional is False and is_fractional_compliant is False:
             for i, label in enumerate(labels.astype(int)):
                 seg_d = deepcopy(self.segment_descriptions[label - 1])
                 seg_d.SegmentNumber = i + 1
@@ -479,7 +485,41 @@ class SegWriter:
         seg_series_description = "Seg of " + ", ".join(label_meanings)
         if len(seg_series_description) > 64:
             seg_series_description = seg_series_description[:61] + "..."
-        if is_fractional:
+        if is_fractional_compliant:
+            if len(segment_descriptions) > 1:
+                raise ValueError(
+                    "is_fractional_compliant==True requires single label"
+                )
+            seg_type = hd.seg.SegmentationTypeValues.BINARY
+            logger.info("Converting mask to pseudo-fractional DICOM seg")
+            sd = segment_descriptions[0]
+            jet_cmap = colormaps.get("jet")
+            percents = np.linspace(0, 1, N_FRACTIONAL + 1, endpoint=True)
+            colours = jet_cmap(percents)
+            label = sd.SegmentLabel
+            desc = sd.SegmentDescription
+            new_segment_descriptions = []
+            new_mask_array = []
+            for i in range(N_FRACTIONAL):
+                new_sd = deepcopy(sd)
+                p1, p2 = percents[i], percents[i + 1]
+                new_label = f"{label} ({int(p1*100)}-{int(p2*100)}%)"
+                new_desc = f"{desc} ({int(p1*100)}-{int(p2*100)}%)"
+                new_sd.SegmentNumber = i + 1
+                new_sd.SegmentLabel = new_label
+                new_sd.SegmentDescription = new_desc
+                curr_mask = (mask_array > p1) * (mask_array <= p2)
+                new_sd.RecommendedDisplayCIELabValue = rgb_to_cielab(
+                    colours[i, :3] * 255
+                )
+                new_segment_descriptions.append(new_sd)
+                new_mask_array.append(curr_mask)
+            segment_descriptions = new_segment_descriptions
+            mask_array = np.concatenate(new_mask_array, axis=-1).astype(
+                mask_array.dtype
+            )
+            logger.info("Converted mask to pseudo-fractional DICOM seg")
+        elif is_fractional:
             seg_type = hd.seg.SegmentationTypeValues.FRACTIONAL
         else:
             seg_type = hd.seg.SegmentationTypeValues.BINARY
@@ -682,6 +722,7 @@ def export_predictions(
 
         if save_proba_map is True:
             dicom_proba_paths = []
+            logger.info("Exporting probabilities")
             for i, proba_map in enumerate(proba_maps):
                 output_path = (
                     f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
@@ -690,7 +731,7 @@ def export_predictions(
                     proba_map,
                     source_files=good_file_paths[0],
                     output_path=output_path,
-                    is_fractional=True,
+                    is_fractional_compliant=True,
                 )
                 if status == "empty":
                     dicom_proba_paths.append(None)
