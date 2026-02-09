@@ -190,7 +190,7 @@ def predict_from_data_iterator_local(
                     [n_classes, *processed_output[0].shape]
                 )
                 for i, label in enumerate(used_labels[1:]):
-                    corrected_prob[label] = processed_output[1][i]
+                    corrected_prob[label] = processed_output[1][i + 1]
                 processed_output = (corrected_mask, corrected_prob)
 
         logger.info("nnUNet: converted logits to segmentation")
@@ -860,8 +860,9 @@ def single_model_inference(
     if flip_xy:
         mask_array = mask_array[..., ::-1, ::-1]
         proba_array = proba_array[..., ::-1, ::-1]
-    logger.info("Removing small objects")
+
     if remove_objects_smaller_than is not None:
+        logger.info("Removing small objects")
         mask_array = small_object_removal(
             mask_array, remove_objects_smaller_than
         )
