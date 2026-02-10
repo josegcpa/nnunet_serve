@@ -443,20 +443,23 @@ class SegWriter:
         if len(labels) == 0:
             logger.warning("Mask is empty")
             return "empty"
-        label_dict = {label: i + 1 for i, label in enumerate(labels)}
-        label_dict[0] = 0
-        mask_array = np.vectorize(label_dict.get)(mask_array)
         segment_descriptions = []
         if is_fractional is False and is_fractional_compliant is False:
+            label_dict = {label: i + 1 for i, label in enumerate(labels)}
+            label_dict[0] = 0
+            mask_array = np.vectorize(label_dict.get)(mask_array)
             for i, label in enumerate(labels.astype(int)):
                 seg_d = deepcopy(self.segment_descriptions[label - 1])
                 seg_d.SegmentNumber = i + 1
                 segment_descriptions.append(seg_d)
+            if len(mask_array.shape) != 4:
+                mask_array = one_hot_encode(
+                    mask_array, len(segment_descriptions)
+                )
         else:
             segment_descriptions = self.segment_descriptions
-
-        if len(mask_array.shape) != 4:
-            mask_array = one_hot_encode(mask_array, len(segment_descriptions))
+            if mask_array.ndim == 3:
+                mask_array = mask_array[..., None]
         image_datasets = [
             self.make_compliant(hd.imread(str(f))) for f in source_files
         ]
@@ -497,27 +500,29 @@ class SegWriter:
             percents = np.linspace(0, 1, N_FRACTIONAL + 1, endpoint=True)
             colours = jet_cmap(percents)
             label = sd.SegmentLabel
-            desc = sd.SegmentDescription
+            if hasattr(sd, "SegmentDescription"):
+                desc = sd.SegmentDescription
+            else:
+                desc = None
             new_segment_descriptions = []
             new_mask_array = []
             for i in range(N_FRACTIONAL):
                 new_sd = deepcopy(sd)
                 p1, p2 = percents[i], percents[i + 1]
-                new_label = f"{label} ({int(p1*100)}-{int(p2*100)}%)"
-                new_desc = f"{desc} ({int(p1*100)}-{int(p2*100)}%)"
                 new_sd.SegmentNumber = i + 1
+                new_label = f"{label} ({int(p1*100)}-{int(p2*100)}%)"
                 new_sd.SegmentLabel = new_label
-                new_sd.SegmentDescription = new_desc
-                curr_mask = (mask_array > p1) * (mask_array <= p2)
+                if desc is not None:
+                    new_desc = f"{desc} ({int(p1*100)}-{int(p2*100)}%)"
+                    new_sd.SegmentDescription = new_desc
+                curr_mask = (mask_array > p1) & (mask_array <= p2)
                 new_sd.RecommendedDisplayCIELabValue = rgb_to_cielab(
                     colours[i, :3] * 255
                 )
                 new_segment_descriptions.append(new_sd)
                 new_mask_array.append(curr_mask)
             segment_descriptions = new_segment_descriptions
-            mask_array = np.concatenate(new_mask_array, axis=-1).astype(
-                mask_array.dtype
-            )
+            mask_array = np.concatenate(new_mask_array, axis=-1).astype(bool)
             logger.info("Converted mask to pseudo-fractional DICOM seg")
         elif is_fractional:
             seg_type = hd.seg.SegmentationTypeValues.FRACTIONAL
