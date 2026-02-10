@@ -24,7 +24,6 @@ dependencies = [
     "torch>=2.9.0",
     "python-multipart>=0.0.20",
     "cachetools>=6.2.1",
-    "fastmcp==2.13",
     "requests>=2.32.5",
     "pydicom-seg",
     "numpy>=2.2.6",
