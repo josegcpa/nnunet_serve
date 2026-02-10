@@ -26,6 +26,7 @@ dependencies = [
     "cachetools>=6.2.1",
     "fastmcp==2.13",
     "requests>=2.32.5",
+    "pydicom-seg",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -37,6 +38,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 totalsegmentator = { git = "https://github.com/wasserth/TotalSegmentator" }
+pydicom-seg = { git = "https://github.com/josegcpa/pydicom-seg" }
 
 [project.scripts]
 nnunet-predict = "nnunet_serve.entrypoints.entrypoint:main"

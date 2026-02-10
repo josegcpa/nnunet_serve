@@ -1922,6 +1922,7 @@ dependencies = [
     { name = "pre-commit" },
     { name = "pydantic" },
     { name = "pydicom" },
+    { name = "pydicom-seg" },
     { name = "pytest" },
     { name = "python-multipart" },
     { name = "requests" },
@@ -1946,6 +1947,7 @@ requires-dist = [
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pydantic", specifier = ">=2.12.2" },
     { name = "pydicom", specifier = ">=3" },
+    { name = "pydicom-seg", git = "https://github.com/josegcpa/pydicom-seg" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "requests", specifier = ">=2.32.5" },
@@ -2817,6 +2819,17 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d7/6f/55ea163b344c91df2e03c007bebf94781f0817656e2c037d7c5bf86c3bfc/pydicom-3.0.1.tar.gz", hash = "sha256:7b8be344b5b62493c9452ba6f5a299f78f8a6ab79786c729b0613698209603ec", size = 2884731, upload-time = "2024-09-22T02:02:43.202Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/a6/98651e752a49f341aa99aa3f6c8ba361728dfc064242884355419df63669/pydicom-3.0.1-py3-none-any.whl", hash = "sha256:db32f78b2641bd7972096b8289111ddab01fb221610de8d7afa835eb938adb41", size = 2376126, upload-time = "2024-09-22T02:02:41.616Z" },
+]
+
+[[package]]
+name = "pydicom-seg"
+version = "0.4.1"
+source = { git = "https://github.com/josegcpa/pydicom-seg#978f01cb15e4f1876e530d69d2d9ce533c3d72e9" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "numpy" },
+    { name = "pydicom" },
+    { name = "simpleitk" },
 ]
 
 [[package]]
