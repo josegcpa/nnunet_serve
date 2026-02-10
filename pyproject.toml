@@ -27,6 +27,7 @@ dependencies = [
     "fastmcp==2.13",
     "requests>=2.32.5",
     "pydicom-seg",
+    "numpy>=2.2.6",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
