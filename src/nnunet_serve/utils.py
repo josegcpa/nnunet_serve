@@ -308,7 +308,19 @@ def sort_dicom_slices(file_paths: list[str]) -> list[str]:
     return [file_paths[i] for i in order]
 
 
-def read_dicom_as_sitk(file_path: list[str], metadata: dict[str, str] = {}):
+def read_dicom_as_sitk(file_path: str, metadata: dict[str, str] = {}):
+    """
+    Reads a DICOM series as an SITK file.
+
+    Args:
+        file_path (str): list of DICOM files or directory containing DICOM
+            files.
+        metadata (dict[str, str]): metadata to be added to the SITK image.
+
+    Returns:
+        sitk.Image: SITK image.
+    """
+
     reader = sitk.ImageSeriesReader()
     dicom_file_names = reader.GetGDCMSeriesFileNames(file_path)
     fs = []
