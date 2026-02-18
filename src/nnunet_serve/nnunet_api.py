@@ -581,6 +581,11 @@ class nnUNetAPI:
                         series_ids[sid_idx] = Path(
                             os.path.join(f"stage_{idx}", pred_name)
                         )
+                    else:
+                        stage_idx = nnunet_id[:idx].index(prev_stage_nnunet_id)
+                        series_ids[sid_idx] = Path(
+                            os.path.join(f"stage_{stage_idx}", pred_name)
+                        )
 
         for i in range(len(insert_at)):
             idx, prev_stage_nnunet_id = insert_at[i]
