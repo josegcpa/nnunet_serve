@@ -660,6 +660,10 @@ def export_predictions(
             output_nifti_path = (
                 f"{stage_dirs[i]}/{output_names['probabilities']}.nii.gz"
             )
+            if proba_map is None:
+                logger.warning(f"proba_map for stage {i} is None, skipping")
+                proba_map_paths.append(None)
+                continue
             sitk.WriteImage(proba_map, output_nifti_path)
             proba_map_paths.append(output_nifti_path)
             logger.info(
@@ -729,6 +733,9 @@ def export_predictions(
             dicom_proba_paths = []
             logger.info("Exporting probabilities")
             for i, proba_map in enumerate(proba_maps):
+                if proba_map is None:
+                    dicom_proba_paths.append(None)
+                    continue
                 output_path = (
                     f"{stage_dirs[i]}/{output_names['probabilities']}.dcm"
                 )
