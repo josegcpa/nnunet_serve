@@ -38,11 +38,12 @@ from nnunet_serve.logging_utils import get_logger, add_file_handler_to_manager
 from nnunet_serve.nnunet_api_utils import (
     FAILURE_STATUS,
     SUCCESS_STATUS,
+    CACHE,
+    CASCADE_ARGUMENTS,
     get_default_params,
     get_info,
     get_series_paths,
     predict,
-    CACHE,
 )
 from nnunet_serve.totalseg_utils import (
     TASK_CONVERSION,
@@ -84,6 +85,16 @@ class_map.update(
 )
 
 TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
+
+
+def make_json_serializable(obj):
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [make_json_serializable(v) for v in obj]
+    return obj
 
 
 def get_totalseg_dir(model_specs: dict):
@@ -533,6 +544,49 @@ class nnUNetAPI:
         if isinstance(nnunet_id, str):
             nnunet_id = [nnunet_id]
 
+        # check whether nnunet_id requires from using "from:"
+        new_inputs = []
+        insert_at = []
+        for idx, nn in enumerate(nnunet_id):
+            series_ids = params["series_folders"][idx]
+            for sid_idx, sid in enumerate(series_ids):
+                if sid.startswith("from:"):
+                    prev_stage_sid = sid.split(":")[1]
+                    is_equal = "=" in prev_stage_sid
+                    is_index = "[" in prev_stage_sid
+                    if is_equal:
+                        prev_stage_nnunet_id, pred_id = prev_stage_sid.split(
+                            "="
+                        )
+                    elif is_index:
+                        prev_stage_nnunet_id, pred_id = prev_stage_sid.split(
+                            "["
+                        )
+                        pred_id = pred_id.replace("]", "")
+                    else:
+                        prev_stage_nnunet_id, pred_id = prev_stage_id, None
+                    if prev_stage_nnunet_id not in nnunet_id[:idx]:
+                        ins = (idx, prev_stage_nnunet_id)
+                        if ins not in insert_at:
+                            channels = self.model_dictionary[
+                                self.alias_dict[prev_stage_nnunet_id]
+                            ]["model_information"]["channel_names"]
+                            new_inputs.append(series_ids[: len(channels)])
+                            insert_at.append(ins)
+                        pred_name = "prediction.nii.gz"
+                        if is_equal:
+                            pred_name = f"prediction.nii.gz={pred_id}"
+                        if is_index:
+                            pred_name = f"prediction.nii.gz[{pred_id}]"
+                        series_ids[sid_idx] = Path(
+                            os.path.join(f"stage_{idx}", pred_name)
+                        )
+
+        for i in range(len(insert_at)):
+            idx, prev_stage_nnunet_id = insert_at[i]
+            nnunet_id.insert(idx, prev_stage_nnunet_id)
+            params["series_folders"].insert(idx, new_inputs[i])
+
         nnunet_path = []
         metadata = []
         default_args = []
@@ -566,11 +620,20 @@ class nnUNetAPI:
 
         default_params = get_default_params(default_args)
         for k in default_params:
+            set_to_default = False
             if k not in inference_request.model_fields_set:
-                params[k] = default_params[k]
+                set_to_default = True
             else:
                 if params[k] is None:
-                    params[k] = default_params[k]
+                    set_to_default = True
+            if set_to_default:
+                params[k] = default_params[k]
+            elif k in CASCADE_ARGUMENTS and insert_at:
+                for ins in insert_at:
+                    v = None
+                    if k in default_params:
+                        v = default_params[k][ins[0]]
+                    params[k].insert(ins[0], v)
         params["min_mem"] = min_mem
 
         if params.get("save_proba_map", False) and all(
@@ -694,6 +757,7 @@ class nnUNetAPI:
             "is_empty": is_empty,
             **output_paths,
         }
+        payload = make_json_serializable(payload)
         if status == FAILURE_STATUS:
             error_str = error
             if self.app is None:
