@@ -722,37 +722,6 @@ class SeriesLoader:
         return [self[s][1] for s in self.series_paths[stage]]
 
 
-def load_series(series_paths: list[list[str]], is_dicom: bool = False):
-    unique_series_paths = []
-    for series_path in series_paths:
-        for s in series_path:
-            if s not in unique_series_paths:
-                unique_series_paths.append(s)
-    unique_volumes = {}
-    all_good_file_paths = {}
-    for s in unique_series_paths:
-        if is_dicom:
-            unique_volumes[s], all_good_file_paths[s] = read_dicom_as_sitk(s)
-        else:
-            unique_volumes[s] = sitk.ReadImage(s)
-    logger.info("Loaded %d unique volumes", len(unique_volumes))
-    all_volumes = []
-    for i, series_path in enumerate(series_paths):
-        if len(series_path) > 1:
-            # resample to first using unique_volumes
-            curr_volumes = [unique_volumes[series_path[0]]] + [
-                resample_image_to_target(
-                    unique_volumes[s], unique_volumes[series_path[0]]
-                )
-                for s in series_path[1:]
-            ]
-        else:
-            curr_volumes = [unique_volumes[series_path[0]]]
-        all_volumes.append(curr_volumes)
-    all_volumes_canonical = [to_closest_canonical_sitk(v) for v in all_volumes]
-    return all_volumes, all_volumes_canonical, all_good_file_paths
-
-
 def process_proba_array(
     proba_array: np.ndarray,
     input_image: sitk.Image,
