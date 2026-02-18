@@ -2,9 +2,10 @@
 General utilities.
 """
 
-import argparse
+import os
 import subprocess as sp
 import time
+import argparse
 from typing import Sequence
 from glob import glob
 
