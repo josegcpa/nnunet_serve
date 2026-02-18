@@ -4,6 +4,7 @@ Utilities for nnU-Net model serving.
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
@@ -243,7 +244,7 @@ def filter_labels(
 
 def get_series_paths(
     study_path: str,
-    series_folders: list[str] | list[list[str]] | None,
+    series_folders: list[str | Path] | list[list[str | Path]] | None,
     n: int | None,
 ) -> tuple[list[str] | list[list[str]], str, str]:
     """
@@ -266,6 +267,12 @@ def get_series_paths(
     Returns:
         tuple[list[str], str, str] | tuple[list[list[str]], str, str]: _description_
     """
+
+    def _get_path(study_path: str, x: str | Path) -> str:
+        if isinstance(x, Path) is False:
+            return os.path.join(study_path, x)
+        return str(x)
+
     if series_folders is None:
         return (
             None,
@@ -273,7 +280,7 @@ def get_series_paths(
             "series_folders must be defined",
         )
     if n is None:
-        series_paths = [os.path.join(study_path, x) for x in series_folders]
+        series_paths = [_get_path(study_path, x) for x in series_folders]
     else:
         study_path = [study_path for _ in range(n)]
         series_paths = []
@@ -288,7 +295,7 @@ def get_series_paths(
                 )
         for i in range(len(study_path)):
             series_paths.append(
-                [os.path.join(study_path[i], x) for x in series_folders[i]]
+                [_get_path(study_path[i], x) for x in series_folders[i]]
             )
 
     return series_paths, SUCCESS_STATUS, None
@@ -564,6 +571,157 @@ def predict(
     return output_paths, identifiers, is_empty
 
 
+class SeriesLoader:
+    """
+    Load and cache medical image series as SimpleITK volumes.
+
+    This helper provides:
+    - Caching: each unique series path is read at most once.
+    - Optional DICOM loading via `read_dicom_as_sitk`.
+    - Optional on-access post-processing controlled by a suffix in the requested path.
+
+    The path string passed to `__getitem__` (and used inside `series_paths`) can include
+    simple modifiers:
+    - `"/path/to/seg.nii.gz=3"`: returns a binary mask `(volume == 3)` cast to `sitkInt32`.
+    - `"/path/to/4d.nii.gz[0]"`: returns the slice/volume at the given index.
+
+    Args:
+        series_paths (list[list[str]]): Nested list of series identifiers grouped by
+            "stage". Each inner list is the set of series to be used at that stage.
+        is_dicom (bool): If `True`, each series path is treated as a DICOM
+            directory and read with `read_dicom_as_sitk`. If `False`, each series
+            path is read using `sitk.ReadImage`.
+    """
+
+    def __init__(self, series_paths: list[list[str]], is_dicom: bool = False):
+        """
+        Create a loader and pre-compute the unique series paths.
+
+        Note:
+            Only the base path (without modifiers) is cached. For example,
+            requesting `"image.nii.gz=1"` and `"image.nii.gz=2"` will load
+            `"image.nii.gz"` once and apply post-processing per request.
+        """
+        self.series_paths = series_paths
+        self.is_dicom = is_dicom
+
+        self.unique_series_paths = []
+
+        for series_path in series_paths:
+            for s in series_path:
+                if s not in self.unique_series_paths:
+                    self.unique_series_paths.append(s)
+
+        self.loaded_volumes = {}
+        self.good_file_paths = {}
+        logger.info(f"Identified {len(self.unique_series_paths)} unique series")
+
+    def __getitem__(self, path: str) -> tuple[sitk.Image, list[str] | None]:
+        """
+        Load a series (if needed) and return the (optionally processed) volume.
+
+        Args:
+            path (str): Series path, optionally suffixed with `=<label>` or `[<index>]`.
+
+        Returns:
+            A tuple `(volume, good_file_paths)` where:
+            - `volume` is the loaded SimpleITK image, potentially post-processed.
+            - `good_file_paths` is only populated for DICOM inputs and corresponds to
+              the list of files considered valid by `read_dicom_as_sitk`.
+        """
+        path, equal, index = self.get_info(path)
+        if path not in self.loaded_volumes:
+            if self.is_dicom:
+                (
+                    self.loaded_volumes[path],
+                    self.good_file_paths[path],
+                ) = read_dicom_as_sitk(path)
+            else:
+                self.loaded_volumes[path] = sitk.ReadImage(path)
+                self.good_file_paths[path] = None
+        volume, good_file_paths = (
+            self.loaded_volumes[path],
+            self.good_file_paths[path],
+        )
+        volume = self.post_process(volume, equal=equal, index=index)
+        return volume, good_file_paths
+
+    def get_info(self, path: str) -> tuple[str, int | None, int | None]:
+        """
+        Parse a series path and extract any post-processing modifier.
+
+        Supported syntaxes:
+        - `"<path>=<int>"`: equality comparison against the given integer label.
+        - `"<path>[<int>]"`: SimpleITK index selection.
+
+        Args:
+            path (str): Raw path string.
+
+        Returns:
+            A tuple `(base_path, equal, index)` where:
+            - `base_path` is the path without the modifier.
+            - `equal` is the parsed integer after `=` (or `None`).
+            - `index` is the parsed integer inside `[...]` (or `None`).
+        """
+        equal, index = None, None
+        if "=" in path:
+            path, equal = path.split("=")
+            equal = int(equal)
+        elif "[" in path:
+            path, index = path.split("[")
+            index = int(index.split("]")[0])
+        return path, equal, index
+
+    def post_process(
+        self,
+        volume: sitk.Image,
+        equal: int | None = None,
+        index: int | None = None,
+    ) -> sitk.Image:
+        """
+        Apply an optional post-processing operation to a loaded volume.
+
+        Args:
+            volume (sitk.Image): Input SimpleITK image.
+            equal (int | None): If provided, returns `(volume == equal)` cast
+                to `sitkInt32`.
+            index (int | None): If provided (and `equal` is `None`), returns
+                `volume[index]`.
+
+        Returns:
+            The processed (or original) image.
+        """
+        if equal is not None:
+            return volume == equal
+        elif index is not None:
+            return volume[index]
+        return sitk.Cast(volume, sitk.sitkFloat32)
+
+    def get_volumes(self, stage: int):
+        """
+        Return the loaded (and post-processed) volumes for a given stage.
+
+        Args:
+            stage (int): Index into `series_paths`.
+
+        Returns:
+            List of `sitk.Image` volumes for the stage.
+        """
+        return [self[s][0] for s in self.series_paths[stage]]
+
+    def get_file_paths(self, stage: int):
+        """Return the DICOM file-path lists for a given stage.
+
+        Args:
+            stage (int): Index into `series_paths`.
+
+        Returns:
+            List of file-path lists returned by `read_dicom_as_sitk` for the stage.
+            For non-DICOM inputs, entries will be `None`.
+        """
+        return [self[s][1] for s in self.series_paths[stage]]
+
+
 def load_series(series_paths: list[list[str]], is_dicom: bool = False):
     unique_series_paths = []
     for series_path in series_paths:
@@ -652,6 +810,7 @@ def process_proba_array(
         proba_map = copy_information_nd(proba_map, input_image)
         mask = sitk.GetImageFromArray(mask.astype(np.uint32))
         mask.CopyInformation(input_image)
+    print(mask)
     mask_stats = sitk.LabelShapeStatisticsImageFilter()
     mask_stats.Execute(mask)
     if len(mask_stats.GetLabels()) == 0:
@@ -1065,9 +1224,7 @@ def multi_model_inference(
         logger.info("Using min_confidence %s for inference", min_confidence)
         logger.info("Using checkpoint_name %s for inference", checkpoint_name)
 
-        all_volumes, all_volumes_canonical, all_good_file_paths = load_series(
-            series_paths, is_dicom
-        )
+        series_loader = SeriesLoader(series_paths, is_dicom)
         all_predictions = []
         all_proba_maps = []
         intersect_with_class_idx = 1
@@ -1079,7 +1236,7 @@ def multi_model_inference(
                 out = os.path.join(tmp_dir, f"stage_{i}")
             mask, proba_map = single_model_inference(
                 nnunet_path=nnunet_path[i],
-                volumes=all_volumes[i],
+                volumes=series_loader.get_volumes(i),
                 class_idx=class_idx_list[i],
                 checkpoint_name=checkpoint_name_list[i],
                 mirroring=mirroring,
@@ -1112,16 +1269,14 @@ def multi_model_inference(
                     crop_class_idx = class_idx_list[i]
         # keep first from last predicted series to replicate previous behaviour
         if is_dicom:
-            good_file_paths = [all_good_file_paths[series_paths[-1][0]]]
+            good_file_paths = [series_loader.get_file_paths(-1)[0]]
         else:
             good_file_paths = None
     else:
-        all_volumes, all_volumes_canonical, all_good_file_paths = load_series(
-            series_paths, is_dicom
-        )
+        series_loader = SeriesLoader(series_paths, is_dicom)
         mask, proba_map = single_model_inference(
             nnunet_path=nnunet_path,
-            volumes=all_volumes[0],
+            volumes=series_loader.get_volumes(0),
             checkpoint_name=checkpoint_name,
             mirroring=mirroring,
             device_id=device_id,
