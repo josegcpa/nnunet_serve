@@ -564,7 +564,13 @@ class nnUNetAPI:
                         )
                         pred_id = pred_id.replace("]", "")
                     else:
-                        prev_stage_nnunet_id, pred_id = prev_stage_id, None
+                        prev_stage_nnunet_id, pred_id = prev_stage_sid, None
+
+                    pred_name = "prediction.nii.gz"
+                    if is_equal:
+                        pred_name = f"prediction.nii.gz={pred_id}"
+                    if is_index:
+                        pred_name = f"prediction.nii.gz[{pred_id}]"
                     if prev_stage_nnunet_id not in nnunet_id[:idx]:
                         ins = (idx, prev_stage_nnunet_id)
                         if ins not in insert_at:
@@ -573,11 +579,6 @@ class nnUNetAPI:
                             ]["model_information"]["channel_names"]
                             new_inputs.append(series_ids[: len(channels)])
                             insert_at.append(ins)
-                        pred_name = "prediction.nii.gz"
-                        if is_equal:
-                            pred_name = f"prediction.nii.gz={pred_id}"
-                        if is_index:
-                            pred_name = f"prediction.nii.gz[{pred_id}]"
                         series_ids[sid_idx] = Path(
                             os.path.join(f"stage_{idx}", pred_name)
                         )
