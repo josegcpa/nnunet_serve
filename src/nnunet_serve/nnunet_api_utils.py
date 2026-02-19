@@ -4,6 +4,8 @@ Utilities for nnU-Net model serving.
 
 import json
 import os
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union
 
@@ -58,6 +60,65 @@ CASCADE_ARGUMENTS = [
     "use_folds",
     "tta",
 ]
+
+
+@dataclass
+class LabelSubsetState:
+    """Holds temporary label-manager state used for class-subset inference."""
+
+    prediction_indices: list[int]
+    used_labels: list[int]
+    correspondence_dict: dict[int, int]
+
+
+class LabelManagerAdapter:
+    """
+    Adapter around nnU-Net LabelManager private state mutations.
+
+    Centralizes private attribute access (`_all_labels`, `_regions`) so calling
+    code does not directly mutate them.
+    """
+
+    def __init__(self, label_manager: LabelManager):
+        self.label_manager = label_manager
+
+    def build_subset_state(
+        self, class_idx: int | list[int]
+    ) -> LabelSubsetState:
+        """Build the temporary label mapping state for a class subset."""
+        if isinstance(class_idx, int):
+            class_idx = [class_idx]
+        used_labels = [0, *class_idx]
+        correspondence_dict = {i: label for i, label in enumerate(used_labels)}
+
+        if self.label_manager._has_regions:
+            new_regions = [
+                region
+                for region in self.label_manager._regions
+                if any(region_label in used_labels for region_label in region)
+            ]
+            if new_regions:
+                used_labels = sorted(
+                    np.unique(np.concatenate(new_regions)).tolist()
+                )
+
+        return LabelSubsetState(
+            prediction_indices=[0, *class_idx],
+            used_labels=used_labels,
+            correspondence_dict=correspondence_dict,
+        )
+
+    @contextmanager
+    def apply_subset_state(self, subset_state: LabelSubsetState):
+        """Temporarily apply subset labels and always restore original state."""
+        old_labels = self.label_manager._all_labels
+        old_regions = self.label_manager._regions
+        self.label_manager._all_labels = subset_state.used_labels
+        try:
+            yield
+        finally:
+            self.label_manager._all_labels = old_labels
+            self.label_manager._regions = old_regions
 
 
 class SeriesLoader:
@@ -359,6 +420,7 @@ def predict_from_data_iterator_local(
     Adapts the original predict_from_data_iterator to use no multiprocessing.
     """
     ret = []
+    label_adapter = LabelManagerAdapter(predictor.label_manager)
     for preprocessed in data_iterator:
         data = preprocessed["data"]
         if isinstance(data, str):
@@ -371,57 +433,54 @@ def predict_from_data_iterator_local(
         prediction = predictor.predict_logits_from_preprocessed_data(data).cpu()
         n_classes = prediction.shape[0]
         logger.info("nnUNet: predicted logits")
-        old_labels = predictor.label_manager._all_labels
-        old_regions = predictor.label_manager._regions
+        subset_state = None
         if class_idx is not None:
-            if isinstance(class_idx, int):
-                class_idx = [class_idx]
-            used_labels = [0, *class_idx]
-            correspondence_dict = {i: lab for i, lab in enumerate(used_labels)}
-            prediction = prediction[[0, *class_idx]]
-            if predictor.label_manager._has_regions:
-                new_regions = [
-                    r
-                    for r in predictor.label_manager._regions
-                    if any([rr in used_labels for rr in r])
-                ]
-                used_labels = (
-                    np.unique(np.concatenate(new_regions)).sort().tolist()
-                )
-            predictor.label_manager._all_labels = used_labels
+            subset_state = label_adapter.build_subset_state(class_idx)
+            prediction = prediction[subset_state.prediction_indices]
 
         logger.info("nnUNet: resampling...")
-        processed_output = (
-            convert_predicted_logits_to_segmentation_with_correct_shape(
-                predicted_logits=prediction,
-                plans_manager=predictor.plans_manager,
-                configuration_manager=predictor.configuration_manager,
-                label_manager=predictor.label_manager,
-                properties_dict=properties,
-                return_probabilities=save_probabilities,
+        if subset_state is not None:
+            with label_adapter.apply_subset_state(subset_state):
+                processed_output = (
+                    convert_predicted_logits_to_segmentation_with_correct_shape(
+                        predicted_logits=prediction,
+                        plans_manager=predictor.plans_manager,
+                        configuration_manager=predictor.configuration_manager,
+                        label_manager=predictor.label_manager,
+                        properties_dict=properties,
+                        return_probabilities=save_probabilities,
+                    )
+                )
+        else:
+            processed_output = (
+                convert_predicted_logits_to_segmentation_with_correct_shape(
+                    predicted_logits=prediction,
+                    plans_manager=predictor.plans_manager,
+                    configuration_manager=predictor.configuration_manager,
+                    label_manager=predictor.label_manager,
+                    properties_dict=properties,
+                    return_probabilities=save_probabilities,
+                )
             )
-        )
         if class_idx is not None:
             if save_probabilities is False:
-                processed_output = np.vectorize(correspondence_dict.get)(
-                    processed_output
-                )
+                processed_output = np.vectorize(
+                    subset_state.correspondence_dict.get
+                )(processed_output)
             else:
-                corrected_mask = np.vectorize(correspondence_dict.get)(
-                    processed_output[0]
-                )
+                corrected_mask = np.vectorize(
+                    subset_state.correspondence_dict.get
+                )(processed_output[0])
                 corrected_prob = np.zeros(
                     [n_classes, *processed_output[0].shape]
                 )
-                for i, label in enumerate(used_labels[1:]):
+                for i, label in enumerate(subset_state.used_labels[1:]):
                     corrected_prob[label] = processed_output[1][i + 1]
                 processed_output = (corrected_mask, corrected_prob)
 
         logger.info("nnUNet: converted logits to segmentation")
         ret.append(processed_output)
         logger.info(f"Done with image of shape {data.shape}")
-        predictor.label_manager._all_labels = old_labels
-        predictor.label_manager._regions = old_regions
 
     if isinstance(data_iterator, MultiThreadedAugmenter):
         data_iterator._finish()
