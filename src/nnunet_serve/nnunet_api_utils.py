@@ -954,8 +954,8 @@ def single_model_inference(
     spacing = predictor.configuration_manager.spacing[::-1]
 
     predictor.dataset_json["file_ending"] = ".nii.gz"
-    if len(predictor.dataset_json["channel_names"]) != len(volumes):
-        exp_chan = predictor.dataset_json["channel_names"]
+    exp_chan = predictor.dataset_json["channel_names"]
+    if len(exp_chan) != len(volumes):
         raise ValueError(
             f"series_paths should have length {len(exp_chan)} ({exp_chan}) but has length {len(volumes)}"
         )
