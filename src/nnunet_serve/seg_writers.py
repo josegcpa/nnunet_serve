@@ -473,7 +473,16 @@ class SegWriter:
                 )
         else:
             if class_idx is not None:
-                segment_descriptions = [self.segment_descriptions[class_idx]]
+                if isinstance(class_idx, list):
+                    if len(class_idx) == 1:
+                        class_idx = class_idx[0]
+                    else:
+                        raise ValueError(
+                            f"class_idx should be int or a list with length 1 (is {class_idx})"
+                        )
+                segment_descriptions = [
+                    self.segment_descriptions[class_idx - 1]
+                ]
             if mask_array.ndim == 3:
                 mask_array = mask_array[..., None]
         image_datasets = [
@@ -800,7 +809,7 @@ def export_predictions(
                     source_files=good_file_paths[0],
                     output_path=output_path,
                     is_fractional_compliant=True,
-                    class_idx=class_idx,
+                    class_idx=class_idx[i],
                 )
                 if status == "empty":
                     dicom_proba_paths.append(None)
