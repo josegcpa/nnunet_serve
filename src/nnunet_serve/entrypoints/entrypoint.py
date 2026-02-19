@@ -63,7 +63,7 @@ def main_with_args(args):
     response_obj = loop.run_until_complete(
         asyncio.ensure_future(nnunet_api.infer(inference_request))
     )
-    status_code = getattr(response_obj, "status_code", 200)
+    status_code = getattr(response_obj, "status_code", 400)
     response = json.loads(response_obj.body.decode("utf-8"))
 
     if status_code >= 400 or response.get("status") != SUCCESS_STATUS:
