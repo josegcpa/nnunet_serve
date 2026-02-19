@@ -259,7 +259,282 @@ def get_model_dictionary() -> tuple[dict, dict]:
 
 
 def dict_to_str(d: dict) -> str:
+    """
+    Converts a dictionary to a string for display.
+
+    Args:
+        d (dict): dictionary which will be converted to string.
+
+    Returns:
+        stringified version of the dictionary.
+    """
+
     return ", ".join([f"{k}: {v}" for k, v in d.items()])
+
+
+def normalize_inference_params(inference_request: InferenceRequest) -> dict:
+    """Normalize request payload into the dict format consumed by inference.
+
+    Args:
+        inference_request (InferenceRequest): Parsed inference request model.
+
+    Returns:
+        dict: Mutable dictionary with enum-like fields converted to plain values.
+    """
+    params = inference_request.__dict__
+    if isinstance(params["cascade_mode"], list) is False:
+        params["cascade_mode"] = [params["cascade_mode"]]
+    params["cascade_mode"] = [x.value for x in params["cascade_mode"]]
+    params["checkpoint_name"] = [x.value for x in params["checkpoint_name"]]
+    return params
+
+
+def expand_cascade_inputs(
+    params: dict,
+    nnunet_id: list[str],
+    model_dictionary: dict,
+    alias_dict: dict,
+) -> tuple[list[str], list[tuple[int, str]]]:
+    """Expand ``from:<model>`` references into explicit cascade stages.
+
+    This function mutates ``params`` and ``nnunet_id`` in place to inject missing
+    upstream cascade stages required by ``from:`` references in ``series_folders``.
+
+    Args:
+        params (dict): Normalized request parameters.
+        nnunet_id (list[str]): Requested model identifiers by stage.
+        model_dictionary (dict): Model metadata indexed by canonical id.
+        alias_dict (dict): Alias-to-canonical-id mapping.
+
+    Returns:
+        tuple[list[str], list[tuple[int, str]]]:
+            - Updated stage-ordered ``nnunet_id`` list.
+            - Insertion metadata as ``(index, model_id)`` tuples.
+    """
+    new_inputs = []
+    insert_at = []
+    for idx, _ in enumerate(nnunet_id):
+        series_ids = params["series_folders"][idx]
+        for sid_idx, sid in enumerate(series_ids):
+            if sid.startswith("from:"):
+                prev_stage_sid = sid.split(":")[1]
+                is_equal = "=" in prev_stage_sid
+                is_index = "[" in prev_stage_sid
+                if is_equal:
+                    prev_stage_nnunet_id, pred_id = prev_stage_sid.split("=")
+                elif is_index:
+                    prev_stage_nnunet_id, pred_id = prev_stage_sid.split("[")
+                    pred_id = pred_id.replace("]", "")
+                else:
+                    prev_stage_nnunet_id, pred_id = prev_stage_sid, None
+
+                pred_name = "prediction.nii.gz"
+                if is_equal:
+                    pred_name = f"prediction.nii.gz={pred_id}"
+                if is_index:
+                    pred_name = f"prediction.nii.gz[{pred_id}]"
+                if prev_stage_nnunet_id not in nnunet_id[:idx]:
+                    ins = (idx, prev_stage_nnunet_id)
+                    if ins not in insert_at:
+                        channels = model_dictionary[
+                            alias_dict[prev_stage_nnunet_id]
+                        ]["model_information"]["channel_names"]
+                        new_inputs.append(series_ids[: len(channels)])
+                        insert_at.append(ins)
+                    series_ids[sid_idx] = Path(
+                        os.path.join(f"stage_{idx}", pred_name)
+                    )
+                else:
+                    stage_idx = nnunet_id[:idx].index(prev_stage_nnunet_id)
+                    series_ids[sid_idx] = Path(
+                        os.path.join(f"stage_{stage_idx}", pred_name)
+                    )
+
+    for i in range(len(insert_at)):
+        idx, prev_stage_nnunet_id = insert_at[i]
+        nnunet_id.insert(idx, prev_stage_nnunet_id)
+        params["series_folders"].insert(idx, new_inputs[i])
+        for k in CASCADE_ARGUMENTS:
+            if k == "series_folders":
+                continue
+            if k in params and isinstance(params[k], list):
+                params[k].insert(idx, None)
+    return nnunet_id, insert_at
+
+
+def resolve_models(
+    nnunet_id: list[str], model_dictionary: dict, alias_dict: dict
+) -> tuple[list[str], list[Any], list[dict], list[bool], int, str | None]:
+    """Resolve model ids to paths/metadata and compute shared execution config.
+
+    Args:
+        nnunet_id (list[str]): Stage-ordered requested model ids.
+        model_dictionary (dict): Model metadata indexed by canonical id.
+        alias_dict (dict): Alias-to-canonical-id mapping.
+
+    Returns:
+        tuple[list[str], list[Any], list[dict], list[bool], int, str | None]:
+            - Resolved model paths.
+            - Per-model output metadata.
+            - Per-model default argument dictionaries.
+            - Per-model TotalSegmentator flags.
+            - Maximum required free GPU memory across models.
+            - Error string when resolution fails, otherwise ``None``.
+    """
+    nnunet_path = []
+    metadata = []
+    default_args = []
+    is_totalseg = []
+    min_mem = 0
+    for nn in nnunet_id:
+        if nn not in alias_dict:
+            return [], [], [], [], 0, f"{nn} is not a valid nnunet_id"
+        nnunet_info = model_dictionary[alias_dict[nn]]
+        nnunet_path.append(nnunet_info["path"])
+        curr_min_mem = nnunet_info.get("min_mem", 4000)
+        if curr_min_mem > min_mem:
+            min_mem = curr_min_mem
+        default_args.append(nnunet_info.get("default_args", {}))
+        metadata.append(nnunet_info.get("metadata", None))
+        is_totalseg.append(nnunet_info.get("is_totalseg", False))
+    return nnunet_path, metadata, default_args, is_totalseg, min_mem, None
+
+
+def apply_request_defaults(
+    params: dict,
+    default_args: list[dict],
+    inference_request: InferenceRequest,
+    insert_at: list[tuple[int, str]],
+) -> None:
+    """Apply model-level default args to normalized request params.
+
+    Args:
+        params (dict): Normalized and expanded request parameters.
+        default_args (list[dict]): Default argument dictionaries from model specs.
+        inference_request (InferenceRequest): Original request model used to detect
+            explicitly set fields.
+        insert_at (list[tuple[int, str]]): Cascade insertion metadata from
+            ``expand_cascade_inputs``.
+    """
+    default_params = get_default_params(default_args)
+    for k in default_params:
+        set_to_default = False
+        if k not in inference_request.model_fields_set:
+            set_to_default = True
+        elif params[k] is None:
+            set_to_default = True
+        if set_to_default:
+            params[k] = default_params[k]
+        elif k in CASCADE_ARGUMENTS and k != "series_folders" and insert_at:
+            for ins in insert_at:
+                v = None
+                if k in default_params:
+                    v = default_params[k][ins[0]]
+                params[k][ins[0]] = v
+
+
+def run_predict_inference(
+    *,
+    series_paths: list,
+    metadata: list[Any],
+    mirroring: bool,
+    params: dict,
+    nnunet_path: list[str],
+    is_totalseg: list[bool],
+    writing_process_pool: ProcessPool | None,
+) -> tuple[dict, list[str], list[bool], str, str | None]:
+    """Run ``predict`` and normalize execution result into a common shape.
+
+    Args:
+        series_paths (list): Stage-wise input paths passed to ``predict``.
+        metadata (list[Any]): Stage-wise metadata payload passed to ``predict``.
+        mirroring (bool): Whether test-time mirroring is enabled.
+        params (dict): Effective normalized inference parameters.
+        nnunet_path (list[str]): Stage-wise model paths.
+        is_totalseg (list[bool]): Stage-wise TotalSegmentator flags.
+        writing_process_pool (ProcessPool | None): Optional process pool for
+            asynchronous export writes.
+
+    Returns:
+        tuple[dict, list[str], list[bool], str, str | None]:
+            ``(output_paths, identifiers, is_empty, status, error)`` where
+            ``status`` is either ``SUCCESS_STATUS`` or ``FAILURE_STATUS``.
+    """
+    if os.environ.get("DEBUG", "0") == "1":
+        output_paths, identifiers, is_empty = predict(
+            series_paths=series_paths,
+            metadata=metadata,
+            mirroring=mirroring,
+            device_id=None,
+            params=params,
+            nnunet_path=nnunet_path,
+            flip_xy=is_totalseg,
+            writing_process_pool=writing_process_pool,
+        )
+        status = SUCCESS_STATUS
+        error = None
+    else:
+        try:
+            output_paths, identifiers, is_empty = predict(
+                series_paths=series_paths,
+                metadata=metadata,
+                mirroring=mirroring,
+                device_id=None,
+                params=params,
+                nnunet_path=nnunet_path,
+                flip_xy=is_totalseg,
+                writing_process_pool=writing_process_pool,
+            )
+            status = SUCCESS_STATUS
+            error = None
+        except Exception as e:
+            output_paths = {}
+            identifiers = []
+            is_empty = []
+            status = FAILURE_STATUS
+            error = str(e)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return output_paths, identifiers, is_empty, status, error
+
+
+def build_infer_success_payload(
+    *,
+    time_elapsed: float,
+    nnunet_path: list[str],
+    metadata: list[Any],
+    request_params: dict,
+    identifiers: list[str],
+    is_empty: list[bool],
+    output_paths: dict,
+) -> dict[str, Any]:
+    """Build the canonical success payload returned by ``infer``.
+
+    Args:
+        time_elapsed (float): Inference wall-clock time in seconds.
+        nnunet_path (list[str]): Resolved model path(s) used in inference.
+        metadata (list[Any]): Metadata used for export operations.
+        request_params (dict): Effective request parameters used in execution.
+        identifiers (list[str]): Async export identifiers (if applicable).
+        is_empty (list[bool]): Per-stage empty-mask flags.
+        output_paths (dict): Export artifact paths.
+
+    Returns:
+        dict[str, Any]: JSON-serializable success payload.
+    """
+    payload = {
+        "time_elapsed": time_elapsed,
+        "nnunet_path": nnunet_path,
+        "metadata": metadata,
+        "request": request_params,
+        "status": SUCCESS_STATUS,
+        "error": None,
+        "identifiers": identifiers,
+        "is_empty": is_empty,
+        **output_paths,
+    }
+    return make_json_serializable(payload)
 
 
 @dataclass
@@ -491,11 +766,75 @@ class nnUNetAPI:
         """
         return InferenceRequest.model_json_schema()
 
+    def _failure_payload(
+        self,
+        error: str,
+        request_payload: dict | None,
+        **extra_fields,
+    ) -> dict[str, Any]:
+        """
+        Build a standardized failure payload for API responses.
+
+        Args:
+            error (str): Error message.
+            request_payload (dict | None): Request payload.
+            **extra_fields: Extra fields to add to the payload.
+
+        Returns:
+            dict[str, Any]: Failure payload.
+        """
+        payload = {
+            "time_elapsed": None,
+            "gpu": None,
+            "nnunet_path": None,
+            "metadata": None,
+            "status": FAILURE_STATUS,
+            "request": request_payload if request_payload is not None else {},
+            "error": error,
+        }
+        payload.update(extra_fields)
+        return payload
+
+    def _raise_or_error_response(
+        self,
+        error: str,
+        status_code: int,
+        request_payload: dict | None,
+        exception_type: type[Exception] = ValueError,
+        **extra_fields,
+    ):
+        """
+        Raise in CLI mode or return standardized JSON error in API mode.
+
+        Args:
+            error (str): Error message.
+            status_code (int): status code to be used for error response.
+            request_payload (dict | None): payload for the request.
+            exception_type (type[Exception] = ValueError): type of Exception.
+            **extra_fields: Extra fields to add to the payload.
+
+        Returns:
+            JSONResponse if self.app is not None.
+
+        Raises:
+            ``exception_type`` error.
+        """
+        if self.app is None:
+            raise exception_type(error)
+        return JSONResponse(
+            content=self._failure_payload(
+                error=error,
+                request_payload=request_payload,
+                **extra_fields,
+            ),
+            status_code=status_code,
+        )
+
     async def healthz(self):
         return {"status": "ok"}
 
     async def readyz(self):
-        models_loaded = bool(self.model_dictionary)
+        models_loaded = len(self.model_dictionary) > 0
         gpu_available = False
         max_free_mem = None
         try:
@@ -530,11 +869,7 @@ class nnUNetAPI:
         """
         if self.app is not None and self.writing_process_pool is not None:
             raise ValueError("Cannot use both app and writing_process_pool")
-        params = inference_request.__dict__
-        if isinstance(params["cascade_mode"], list) is False:
-            params["cascade_mode"] = [params["cascade_mode"]]
-        params["cascade_mode"] = [x.value for x in params["cascade_mode"]]
-        params["checkpoint_name"] = [x.value for x in params["checkpoint_name"]]
+        params = normalize_inference_params(inference_request)
         add_file_handler_to_manager(
             log_path=os.path.join(params["output_dir"], "nnunet_serve.log"),
             exclude=[
@@ -548,107 +883,38 @@ class nnUNetAPI:
         if isinstance(nnunet_id, str):
             nnunet_id = [nnunet_id]
 
-        # check whether nnunet_id requires from using "from:"
-        new_inputs = []
-        insert_at = []
-        for idx, nn in enumerate(nnunet_id):
-            series_ids = params["series_folders"][idx]
-            for sid_idx, sid in enumerate(series_ids):
-                if sid.startswith("from:"):
-                    prev_stage_sid = sid.split(":")[1]
-                    is_equal = "=" in prev_stage_sid
-                    is_index = "[" in prev_stage_sid
-                    if is_equal:
-                        prev_stage_nnunet_id, pred_id = prev_stage_sid.split(
-                            "="
-                        )
-                    elif is_index:
-                        prev_stage_nnunet_id, pred_id = prev_stage_sid.split(
-                            "["
-                        )
-                        pred_id = pred_id.replace("]", "")
-                    else:
-                        prev_stage_nnunet_id, pred_id = prev_stage_sid, None
+        nnunet_id, insert_at = expand_cascade_inputs(
+            params=params,
+            nnunet_id=nnunet_id,
+            model_dictionary=self.model_dictionary,
+            alias_dict=self.alias_dict,
+        )
 
-                    pred_name = "prediction.nii.gz"
-                    if is_equal:
-                        pred_name = f"prediction.nii.gz={pred_id}"
-                    if is_index:
-                        pred_name = f"prediction.nii.gz[{pred_id}]"
-                    if prev_stage_nnunet_id not in nnunet_id[:idx]:
-                        ins = (idx, prev_stage_nnunet_id)
-                        if ins not in insert_at:
-                            channels = self.model_dictionary[
-                                self.alias_dict[prev_stage_nnunet_id]
-                            ]["model_information"]["channel_names"]
-                            new_inputs.append(series_ids[: len(channels)])
-                            insert_at.append(ins)
-                        series_ids[sid_idx] = Path(
-                            os.path.join(f"stage_{idx}", pred_name)
-                        )
-                    else:
-                        stage_idx = nnunet_id[:idx].index(prev_stage_nnunet_id)
-                        series_ids[sid_idx] = Path(
-                            os.path.join(f"stage_{stage_idx}", pred_name)
-                        )
+        (
+            nnunet_path,
+            metadata,
+            default_args,
+            is_totalseg,
+            min_mem,
+            model_resolution_error,
+        ) = resolve_models(
+            nnunet_id=nnunet_id,
+            model_dictionary=self.model_dictionary,
+            alias_dict=self.alias_dict,
+        )
+        if model_resolution_error is not None:
+            return self._raise_or_error_response(
+                error=model_resolution_error,
+                status_code=404,
+                request_payload=params,
+            )
 
-        for i in range(len(insert_at)):
-            idx, prev_stage_nnunet_id = insert_at[i]
-            nnunet_id.insert(idx, prev_stage_nnunet_id)
-            params["series_folders"].insert(idx, new_inputs[i])
-            for k in CASCADE_ARGUMENTS:
-                if k == "series_folders":
-                    continue
-                if k in params and isinstance(params[k], list):
-                    params[k].insert(idx, None)
-
-        nnunet_path = []
-        metadata = []
-        default_args = []
-        is_totalseg = []
-        min_mem = 0
-        for nn in nnunet_id:
-            if nn not in self.alias_dict:
-                error_str = f"{nn} is not a valid nnunet_id"
-                if self.app is None:
-                    raise ValueError(error_str)
-                return JSONResponse(
-                    content={
-                        "time_elapsed": None,
-                        "gpu": None,
-                        "nnunet_path": None,
-                        "metadata": None,
-                        "request": params,
-                        "status": FAILURE_STATUS,
-                        "error": error_str,
-                    },
-                    status_code=404,
-                )
-            nnunet_info = self.model_dictionary[self.alias_dict[nn]]
-            nnunet_path.append(nnunet_info["path"])
-            curr_min_mem = nnunet_info.get("min_mem", 4000)
-            if curr_min_mem > min_mem:
-                min_mem = curr_min_mem
-            default_args.append(nnunet_info.get("default_args", {}))
-            metadata.append(nnunet_info.get("metadata", None))
-            is_totalseg.append(nnunet_info.get("is_totalseg", False))
-
-        default_params = get_default_params(default_args)
-        for k in default_params:
-            set_to_default = False
-            if k not in inference_request.model_fields_set:
-                set_to_default = True
-            else:
-                if params[k] is None:
-                    set_to_default = True
-            if set_to_default:
-                params[k] = default_params[k]
-            elif k in CASCADE_ARGUMENTS and k != "series_folders" and insert_at:
-                for ins in insert_at:
-                    v = None
-                    if k in default_params:
-                        v = default_params[k][ins[0]]
-                    params[k][ins[0]] = v
+        apply_request_defaults(
+            params=params,
+            default_args=default_args,
+            inference_request=inference_request,
+            insert_at=insert_at,
+        )
         params["min_mem"] = min_mem
 
         if params.get("save_proba_map", False) and all(
@@ -657,19 +923,10 @@ class nnUNetAPI:
             error_str = (
                 "proba_threshold must be not-None if save_proba_map is True"
             )
-            if self.app is None:
-                raise ValueError(error_str)
-            return JSONResponse(
-                content={
-                    "time_elapsed": None,
-                    "gpu": None,
-                    "nnunet_path": None,
-                    "metadata": None,
-                    "status": FAILURE_STATUS,
-                    "request": params,
-                    "error": error_str,
-                },
+            return self._raise_or_error_response(
+                error=error_str,
                 status_code=400,
+                request_payload=params,
             )
 
         series_paths, code, error_msg = get_series_paths(
@@ -680,38 +937,21 @@ class nnUNetAPI:
 
         if code == FAILURE_STATUS:
             error_str = error_msg
-            if self.app is None:
-                raise ValueError(error_str)
-            return JSONResponse(
-                content={
-                    "time_elapsed": None,
-                    "gpu": None,
-                    "nnunet_path": None,
-                    "metadata": None,
-                    "status": FAILURE_STATUS,
-                    "request": params,
-                    "error": error_msg,
-                },
+            return self._raise_or_error_response(
+                error=error_str,
                 status_code=400,
+                request_payload=params,
             )
 
         try:
             wait_for_gpu(min_mem)
         except (RuntimeError, TimeoutError) as e:
             error_str = str(e)
-            if self.app is None:
-                raise RuntimeError(error_str)
-            return JSONResponse(
-                content={
-                    "time_elapsed": None,
-                    "gpu": None,
-                    "nnunet_path": None,
-                    "metadata": None,
-                    "status": FAILURE_STATUS,
-                    "request": params,
-                    "error": str(e),
-                },
+            return self._raise_or_error_response(
+                error=error_str,
                 status_code=503,
+                request_payload=params,
+                exception_type=RuntimeError,
             )
 
         if "tta" in params:
@@ -720,63 +960,41 @@ class nnUNetAPI:
             mirroring = True
 
         a = time.time()
-        if os.environ.get("DEBUG", "0") == "1":
-            output_paths, identifiers, is_empty = predict(
-                series_paths=series_paths,
-                metadata=metadata,
-                mirroring=mirroring,
-                device_id=None,
-                params=params,
-                nnunet_path=nnunet_path,
-                flip_xy=is_totalseg,
-                writing_process_pool=self.writing_process_pool,
-            )
-            error = None
-            status = SUCCESS_STATUS
-        else:
-            try:
-                output_paths, identifiers, is_empty = predict(
-                    series_paths=series_paths,
-                    metadata=metadata,
-                    mirroring=mirroring,
-                    device_id=None,
-                    params=params,
-                    nnunet_path=nnunet_path,
-                    flip_xy=is_totalseg,
-                    writing_process_pool=self.writing_process_pool,
-                )
-                error = None
-                status = SUCCESS_STATUS
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-            except Exception as e:
-                output_paths = {}
-                identifiers = []
-                is_empty = []
-                status = FAILURE_STATUS
-                error = str(e)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        (
+            output_paths,
+            identifiers,
+            is_empty,
+            status,
+            error,
+        ) = run_predict_inference(
+            series_paths=series_paths,
+            metadata=metadata,
+            mirroring=mirroring,
+            params=params,
+            nnunet_path=nnunet_path,
+            is_totalseg=is_totalseg,
+            writing_process_pool=self.writing_process_pool,
+        )
         b = time.time()
-
-        payload = {
-            "time_elapsed": b - a,
-            "nnunet_path": nnunet_path,
-            "metadata": metadata,
-            "request": params,
-            "status": status,
-            "error": error,
-            "identifiers": identifiers,
-            "is_empty": is_empty,
-            **output_paths,
-        }
-        payload = make_json_serializable(payload)
         if status == FAILURE_STATUS:
             error_str = error
-            if self.app is None:
-                raise ValueError(error_str)
-            return JSONResponse(content=payload, status_code=500)
+            return self._raise_or_error_response(
+                error=error_str,
+                status_code=500,
+                request_payload=params,
+                identifiers=identifiers,
+                is_empty=is_empty,
+                **output_paths,
+            )
+        payload = build_infer_success_payload(
+            time_elapsed=b - a,
+            nnunet_path=nnunet_path,
+            metadata=metadata,
+            request_params=params,
+            identifiers=identifiers,
+            is_empty=is_empty,
+            output_paths=output_paths,
+        )
         return JSONResponse(content=payload, status_code=200)
 
     async def infer_file(
@@ -805,15 +1023,10 @@ class nnUNetAPI:
             inference_req = InferenceRequest(**payload)
         except Exception as exc:
             return fastapi.responses.JSONResponse(
-                content={
-                    "time_elapsed": None,
-                    "gpu": None,
-                    "nnunet_path": None,
-                    "metadata": None,
-                    "request": payload,
-                    "status": FAILURE_STATUS,
-                    "error": f"Invalid request payload: {exc}",
-                },
+                content=self._failure_payload(
+                    error=f"Invalid request payload: {exc}",
+                    request_payload=payload,
+                ),
                 status_code=422,
             )
 
@@ -821,15 +1034,10 @@ class nnUNetAPI:
             store_uploaded_file(file, job_id=job_id)
         except Exception as exc:
             return fastapi.responses.JSONResponse(
-                content={
-                    "time_elapsed": None,
-                    "gpu": None,
-                    "nnunet_path": None,
-                    "metadata": None,
-                    "request": {},
-                    "status": FAILURE_STATUS,
-                    "error": f"Failed to store uploaded file: {exc}",
-                },
+                content=self._failure_payload(
+                    error=f"Failed to store uploaded file: {exc}",
+                    request_payload={},
+                ),
                 status_code=400,
             )
 
