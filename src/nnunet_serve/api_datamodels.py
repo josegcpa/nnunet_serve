@@ -118,6 +118,8 @@ class InferenceRequestBase(BaseModel):
             )
         if isinstance(self.cascade_mode, list) is False:
             self.__internal_update_field("cascade_mode", [self.cascade_mode])
+        if isinstance(self.class_idx, int):
+            self.__internal_update_field("class_idx", [self.class_idx])
 
 
 class InferenceRequest(InferenceRequestBase):
