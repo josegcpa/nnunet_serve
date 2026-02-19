@@ -27,7 +27,7 @@ from nnunetv2.utilities.plans_handling.plans_handler import (
 
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter, export_predictions
-from nnunet_serve.sitk_utils import get_crop, to_closest_canonical_sitk
+from nnunet_serve.sitk_utils import get_crop
 from nnunet_serve.utils import (
     copy_information_nd,
     extract_lesion_candidates,
@@ -37,7 +37,7 @@ from nnunet_serve.utils import (
     wait_for_gpu,
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
-from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
+from nnunet_serve.sitk_utils import resample_image
 from nnunet_serve.process_pool import ProcessPool
 
 logger = get_logger(__name__)
@@ -50,10 +50,13 @@ from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
 CASCADE_ARGUMENTS = [
     "proba_threshold",
     "class_idx_list",
+    "class_idx",
+    "series_folders",
     "min_confidence",
     "checkpoint_name",
     "cascade_mode",
     "use_folds",
+    "tta",
 ]
 
 
@@ -494,13 +497,7 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
         .model_dump()
         .items()
     }
-    args_with_mult_support = [
-        "proba_threshold",
-        "min_confidence",
-        "class_idx",
-        "series_folders",
-        "use_folds",
-    ]
+    args_with_mult_support = CASCADE_ARGUMENTS
     if isinstance(default_args, dict):
         default_params = default_args
     elif isinstance(default_args, list):
