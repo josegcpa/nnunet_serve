@@ -638,7 +638,7 @@ class nnUNetAPI:
                     set_to_default = True
             if set_to_default:
                 params[k] = default_params[k]
-            elif k in CASCADE_ARGUMENTS and insert_at:
+            elif k in CASCADE_ARGUMENTS and k != "series_folders" and insert_at:
                 for ins in insert_at:
                     v = None
                     if k in default_params:
