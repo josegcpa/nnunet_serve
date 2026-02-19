@@ -71,6 +71,10 @@ ADDITIONAL_SNOMED_TYPES = {
     "liver_segment_6": ("CouinaudHepaticSegmentVI", "277960005"),
     "liver_segment_7": ("CouinaudHepaticSegmentVII", "277961009"),
     "liver_segment_8": ("CouinaudHepaticSegmentVIII", "277962002"),
+    "lung_left": ("Lung", "39607008"),
+    "lung_right": ("Lung", "39607008"),
+    "vertebrae": ("Vertebrae", "123037004"),
+    "intervertebral_discs": ("IntervertebralDisc", "360499006"),
 }
 
 
