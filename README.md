@@ -104,12 +104,31 @@ uv run nnunet-predict \
   --crop_padding 20 20 20
 ```
 
+Example with `from:` references in the same stage input list:
+
+```bash
+uv run nnunet-predict \
+  --study_path path/to/study \
+  --series_folders seriesT2,seriesDWI,seriesADC,from:prostate_zone_mri=1,from:prostate_zone_mri=2 \
+  --nnunet_id prostate_clinically_significant_lesion_bpmri \
+  --output_dir path/to/output \
+  --is_dicom \
+  --cascade_mode crop \
+  --proba_map \
+  --proba_threshold 0.1
+```
+
 #### Extended argument description
 
 A core concept underlies this framework - that of cascading predictions. The output of a prediction is used as an input for the next prediction by either cropping the input image, filtering objects in the output image based on a minimum intersection or by appending it to the input image. Fields flagged with 💧 support multiple values in compliance with the cascade. For these fields, multiple space-separated values can be specified as long as the number of values matches the number of models (`nnunet_id`) in the cascade. In some instances, multiple values at each stage might require specification (`series_folders` or `folds`). For these, at each stage, multiple values can be specified using commas (`,`).
 
 - **`--study_path` / `-i`**: Path to the input study directory containing the imaging data. Required.
 - **`--series_folders` / `-s`**: One or more relative paths to series folders within the study. Required. Multiple **space separated** values refer to multiple stages of the cascade. At each stage, different series can be specified using commas (`,`) 💧
+- **`--series_folders` / `-s` advanced (`from:` syntax)**: In cascades, you can reference a prior stage prediction as an input channel using `from:<model_or_alias>`. Optional selectors are supported:
+  - `from:<model_or_alias>` → full predicted mask (`prediction.nii.gz`)
+  - `from:<model_or_alias>=<label>` → binary mask for one label (for example `=1`)
+  - `from:<model_or_alias>[<index>]` → indexed volume/channel access
+  This allows "late" models to consume outputs from earlier models without manually creating intermediate files.
 - **`--nnunet_id`**: Identifier(s) of the nnU‑Net model(s) to run. Provide one or more model names; they will be applied sequentially 💧
 - **`--checkpoint_name`**: Name(s) of the checkpoint file(s) to load (default: `checkpoint_final.pth`) 💧
 - **`--output_dir` / `-o`**: Directory where all output files (segmentations, maps, logs) will be written. Required.
@@ -335,6 +354,7 @@ Common optional fields (with server defaults or per-model `default_args`):
 Notes:
 - For multi-model requests (`nnunet_id` is a list), `series_folders` must be a list of lists of the same length, and list-valued parameters (`class_idx`, `proba_threshold`, etc.) can be supplied per model. Defaults are merged accordingly.
 - When `is_dicom=true`, each model must have `metadata` defined in `model-serve-spec.yaml` (either `path` to a DCMQI JSON template or an inline metadata object). Otherwise inference will fail.
+- `series_folders` also supports cascade references via `from:<model_or_alias>`, `from:<model_or_alias>=<label>`, and `from:<model_or_alias>[<index>]`. Missing upstream stages are injected automatically when needed.
 
 #### Response schema (POST /infer)
 
