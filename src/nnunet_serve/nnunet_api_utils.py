@@ -646,6 +646,7 @@ def predict(
         "save_proba_map",
         "save_nifti_inputs",
         "save_rt_struct_output",
+        "class_idx",
     ]
     delete_params = [
         "nnunet_id",

@@ -395,7 +395,16 @@ class SegWriter:
             mask = sitk.GetArrayFromImage(mask)
         return mask
 
-    def make_compliant(self, f):
+    def make_compliant(self, f: pydicom.Dataset):
+        """
+        Tries to smooth some potential missing fields.
+
+        Args:
+            f (pydicom.Dataset): a pydicom Dataset.
+
+        Returns:
+            A compliant pydicom.Dataset.
+        """
         if hasattr(f, "PatientSex") is False:
             f.PatientSex = "O"
         if hasattr(f, "AccessionNumber") is False:
@@ -411,6 +420,7 @@ class SegWriter:
         output_path: str,
         is_fractional: bool = False,
         is_fractional_compliant: bool = False,
+        class_idx: int | None = None,
     ):
         """
         Writes a DICOM segmentation file.
@@ -425,9 +435,14 @@ class SegWriter:
             is_fractional_compliant (bool, optional): whether the probability mask
                 should be converted to a map with ``N_FRACTIONAL`` labels,
                 each corresponding to a percentage.
+            class_idx (int | None, optional): index used for selecting specific
+                segment descriptions when saving probability maps. Only used when
+                either ``is_fractional==True`` or
+                ``is_fractional_compliant==True``.
         """
         mask_array = self.to_array_if_necessary(mask_array)
         sorted_source_files = sort_dicom_slices(list(source_files))
+        any_fractional = is_fractional or is_fractional_compliant
         if sorted_source_files != list(source_files):
             idx_map = {p: i for i, p in enumerate(source_files)}
             try:
@@ -444,7 +459,7 @@ class SegWriter:
             logger.warning("Mask is empty")
             return "empty"
         segment_descriptions = []
-        if is_fractional is False and is_fractional_compliant is False:
+        if any_fractional is False:
             label_dict = {label: i + 1 for i, label in enumerate(labels)}
             label_dict[0] = 0
             mask_array = np.vectorize(label_dict.get)(mask_array)
@@ -457,7 +472,8 @@ class SegWriter:
                     mask_array, len(segment_descriptions)
                 )
         else:
-            segment_descriptions = self.segment_descriptions
+            if class_idx is not None:
+                segment_descriptions = [self.segment_descriptions[class_idx]]
             if mask_array.ndim == 3:
                 mask_array = mask_array[..., None]
         image_datasets = [
@@ -471,7 +487,11 @@ class SegWriter:
             raise Exception(
                 f"Mask shape {mask_array.shape} does not match image shape {frames}x{rows}x{cols}"
             )
-        if mask_array.shape[-1] != len(segment_descriptions):
+        if (
+            mask_array.shape[-1] != len(segment_descriptions)
+            and any_fractional is False
+        ):
+            # this check makes no sense for fractional outputs!
             raise Exception(
                 f"Mask shape {mask_array.shape} does not match number of segments {len(segment_descriptions)}"
             )
@@ -626,7 +646,43 @@ def export_predictions(
     save_proba_map: bool = False,
     save_nifti_inputs: bool = False,
     save_rt_struct_output: bool = False,
+    class_idx: int | None = None,
 ):
+    """Export stage-wise nnUNet outputs to NIfTI and optional DICOM artifacts.
+
+    This function writes one output subdirectory per stage (`stage_<i>`) under
+    `output_dir` and stores prediction masks for all stages. Depending on the
+    flags, it can also export probability maps, input NIfTI volumes, DICOM SEG,
+    DICOM RTSTRUCT, and DICOM fractional SEG outputs.
+
+    Args:
+        masks: Predicted segmentation masks, one `sitk.Image` per stage.
+        output_dir: Base output directory.
+        volumes: Optional stage-wise input volumes used to export NIfTI inputs
+            when `save_nifti_inputs` is enabled.
+        proba_maps: Optional stage-wise probability maps used when
+            `save_proba_map` is enabled.
+        good_file_paths: Source DICOM file paths used to create DICOM outputs.
+        suffix: Optional suffix appended to exported file names.
+        is_dicom: Whether to export DICOM-derived outputs (SEG/RTSTRUCT).
+        seg_writers: A `SegWriter` or list of stage-specific `SegWriter`
+            instances used for DICOM exports.
+        save_proba_map: If `True`, exports probability maps in NIfTI and (for
+            DICOM mode) fractional DICOM SEG format.
+        save_nifti_inputs: If `True`, exports input NIfTI volumes used per stage.
+        save_rt_struct_output: If `True` and `is_dicom` is enabled, exports
+            RTSTRUCT in addition to DICOM SEG.
+        class_idx: Optional class index metadata for probability export workflows.
+
+    Returns:
+        dict: Mapping of artifact type to exported paths. Keys may include:
+        - `nifti_prediction`
+        - `nifti_proba`
+        - `nifti_inputs`
+        - `dicom_segmentation`
+        - `dicom_struct`
+        - `dicom_fractional_segmentation`
+    """
     output_names = {
         "prediction": (
             "prediction" if suffix is None else f"prediction_{suffix}"
@@ -744,6 +800,7 @@ def export_predictions(
                     source_files=good_file_paths[0],
                     output_path=output_path,
                     is_fractional_compliant=True,
+                    class_idx=class_idx,
                 )
                 if status == "empty":
                     dicom_proba_paths.append(None)
