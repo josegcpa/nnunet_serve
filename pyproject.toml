@@ -44,3 +44,8 @@ pydicom-seg = { git = "https://github.com/josegcpa/pydicom-seg" }
 nnunet-predict = "nnunet_serve.entrypoints.entrypoint:main"
 nnunet-predict-batch = "nnunet_serve.entrypoints.entrypoint_batch:main"
 nnunet-validate-metadata = "nnunet_serve.entrypoints.validate_metadata:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests",
+]
