@@ -88,6 +88,10 @@ TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 
 def make_json_serializable(obj):
+    """
+    Makes an object JSON serializable.
+    """
+
     if isinstance(obj, Path):
         return str(obj)
     if isinstance(obj, dict):
@@ -740,7 +744,6 @@ class nnUNetAPI:
                 status = SUCCESS_STATUS
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                b = time.time()
 
             except Exception as e:
                 output_paths = {}
@@ -776,7 +779,8 @@ class nnUNetAPI:
         inference_request: Request,
         file: UploadFile = File(...),
     ):
-        """Accept a file (or archive) upload, stores it, builds an InferenceRequest,
+        """
+        Accept a file (or archive) upload, stores it, builds an InferenceRequest,
         and delegates to the existing ``infer`` method.
         """
 
