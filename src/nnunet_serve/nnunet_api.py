@@ -59,7 +59,7 @@ logger = get_logger(__name__)
 
 torch.serialization.add_safe_globals(
     [
-        np.core.multiarray.scalar,
+        np._core.multiarray.scalar,
         np.dtype,
         np.dtypes.Float64DType,
         np.dtypes.Float32DType,
