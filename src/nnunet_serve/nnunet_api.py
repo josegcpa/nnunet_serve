@@ -596,6 +596,11 @@ class nnUNetAPI:
             idx, prev_stage_nnunet_id = insert_at[i]
             nnunet_id.insert(idx, prev_stage_nnunet_id)
             params["series_folders"].insert(idx, new_inputs[i])
+            for k in CASCADE_ARGUMENTS:
+                if k == "series_folders":
+                    continue
+                if k in params and isinstance(params[k], list):
+                    params[k].insert(idx, None)
 
         nnunet_path = []
         metadata = []
@@ -643,7 +648,7 @@ class nnUNetAPI:
                     v = None
                     if k in default_params:
                         v = default_params[k][ins[0]]
-                    params[k].insert(ins[0], v)
+                    params[k][ins[0]] = v
         params["min_mem"] = min_mem
 
         if params.get("save_proba_map", False) and all(
