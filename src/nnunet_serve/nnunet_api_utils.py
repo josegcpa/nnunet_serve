@@ -37,7 +37,7 @@ from nnunet_serve.utils import (
     wait_for_gpu,
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
-from nnunet_serve.sitk_utils import resample_image
+from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 from nnunet_serve.process_pool import ProcessPool
 
 logger = get_logger(__name__)
@@ -104,6 +104,7 @@ class SeriesLoader:
 
         self.loaded_volumes = {}
         self.good_file_paths = {}
+        self.loaded_resampled_volumes = {}
         logger.info(f"Identified {len(self.unique_series_paths)} unique series")
 
     def __getitem__(self, path: str) -> tuple[sitk.Image, list[str] | None]:
@@ -199,7 +200,7 @@ class SeriesLoader:
             return volume[index]
         return sitk.Cast(volume, sitk.sitkFloat32)
 
-    def get_volumes(self, stage: int):
+    def get_volumes(self, stage: int) -> list[sitk.Image]:
         """
         Return the loaded (and post-processed) volumes for a given stage.
 
@@ -209,9 +210,9 @@ class SeriesLoader:
         Returns:
             List of `sitk.Image` volumes for the stage.
         """
-        return [self[s][0] for s in self.series_paths[stage]]
+        return [self.get_resampled(s, stage) for s in self.series_paths[stage]]
 
-    def get_file_paths(self, stage: int):
+    def get_file_paths(self, stage: int) -> list[list[str]]:
         """Return the DICOM file-path lists for a given stage.
 
         Args:
@@ -222,6 +223,52 @@ class SeriesLoader:
             For non-DICOM inputs, entries will be `None`.
         """
         return [self[s][1] for s in self.series_paths[stage]]
+
+    def might_be_mask(self, image: sitk.Image) -> bool:
+        """
+        Makes an educated guess on whether ``image`` is a mask.
+
+        Args:
+            image (sitk.Image): image.
+
+        Returns:
+            Boolean which is True if image is an integer _and_ has fewer than
+                50 unique values.
+        """
+        is_mask = False
+        if "int" in image.GetPixelIDTypeAsString().lower():
+            stats_filter = sitk.LabelShapeStatisticsImageFilter()
+            stats_filter.Execute(image)
+            if stats_filter.GetNumberOfLabels() < 50:
+                is_mask = True
+        return is_mask
+
+    def get_resampled(self, path: str, stage: int) -> sitk.Image:
+        """
+        Similar to __getitem__ but resamples to first series in stage.
+
+        Args:
+            path (str): Series path, optionally suffixed with `=<label>` or `[<index>]`.
+            stage (int): Index into `series_paths`.
+
+        Returns:
+            sitk.Image: The loaded image, resampled to match the first series in the stage.
+        """
+        first_path = self.series_paths[stage][0]
+        identifier = (path, first_path)
+        if identifier not in self.loaded_resampled_volumes:
+            if path == first_path:
+                resampled_image = self[path][0]
+            else:
+                resampled_image = resample_image_to_target(
+                    self[path][0],
+                    self[first_path][0],
+                    is_mask=self.might_be_mask(self[path][0]),
+                )
+
+            self.loaded_resampled_volumes[identifier] = resampled_image
+
+        return self.loaded_resampled_volumes[identifier]
 
 
 def convert_predicted_logits_to_segmentation_with_correct_shape(
