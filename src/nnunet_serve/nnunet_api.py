@@ -294,6 +294,7 @@ def expand_cascade_inputs(
     nnunet_id: list[str],
     model_dictionary: dict,
     alias_dict: dict,
+    may_inject_series: list[dict] | None = None,
 ) -> tuple[list[str], list[tuple[int, str]]]:
     """Expand ``from:<model>`` references into explicit cascade stages.
 
@@ -305,16 +306,28 @@ def expand_cascade_inputs(
         nnunet_id (list[str]): Requested model identifiers by stage.
         model_dictionary (dict): Model metadata indexed by canonical id.
         alias_dict (dict): Alias-to-canonical-id mapping.
+        may_inject_series (list[dict], optional): Optional list of dictionaries
+            indicating which series in each cascade stage may need to be injected
+            from upstream model outputs. Each dictionary maps series indices to
+            their "from:" reference strings. When provided, enables automatic
+            injection of missing upstream cascade stages based on these
+            references. Defaults to None.
 
     Returns:
         tuple[list[str], list[tuple[int, str]]]:
             - Updated stage-ordered ``nnunet_id`` list.
             - Insertion metadata as ``(index, model_id)`` tuples.
     """
+    if may_inject_series is None:
+        may_inject_series = [{} for _ in nnunet_id]
     new_inputs = []
     insert_at = []
     for idx, _ in enumerate(nnunet_id):
         series_ids = params["series_folders"][idx]
+        if len(may_inject_series[idx]) > 0:
+            for k in may_inject_series[idx]:
+                if len(series_ids) <= k:
+                    series_ids.append(may_inject_series[idx][k])
         for sid_idx, sid in enumerate(series_ids):
             if sid.startswith("from:"):
                 prev_stage_sid = sid.split(":")[1]
@@ -365,7 +378,8 @@ def expand_cascade_inputs(
 def resolve_models(
     nnunet_id: list[str], model_dictionary: dict, alias_dict: dict
 ) -> tuple[list[str], list[Any], list[dict], list[bool], int, str | None]:
-    """Resolve model ids to paths/metadata and compute shared execution config.
+    """
+    Resolve model ids to paths/metadata and compute shared execution config.
 
     Args:
         nnunet_id (list[str]): Stage-ordered requested model ids.
@@ -381,6 +395,7 @@ def resolve_models(
             - Maximum required free GPU memory across models.
             - Error string when resolution fails, otherwise ``None``.
     """
+
     nnunet_path = []
     metadata = []
     default_args = []
@@ -400,13 +415,40 @@ def resolve_models(
     return nnunet_path, metadata, default_args, is_totalseg, min_mem, None
 
 
+def get_may_inject(default_args: list[dict]):
+    """
+    Determines whether there are injectable series. These are exclusively the
+    series which are to be obtained from an inference (i.e. starting with a `from:`).
+
+    Args:
+        default_args (list[dict]): Default argument dictionaries from model specs.
+
+    Returns:
+        list[dict]: List of dictionaries where each dictionary contains the index of the series
+        that is to be injected if necessary.
+    """
+    default_params = get_default_params(default_args)
+    if "series_folders" in default_params:
+        all_may_inject = []
+        series_folders = default_params["series_folders"]
+        for sf in series_folders:
+            may_inject = {}
+            for j, s in enumerate(sf):
+                if "from:" in s:
+                    may_inject[j] = s
+            all_may_inject.append(may_inject)
+        return all_may_inject
+    return None
+
+
 def apply_request_defaults(
     params: dict,
     default_args: list[dict],
     inference_request: InferenceRequest,
     insert_at: list[tuple[int, str]],
 ) -> None:
-    """Apply model-level default args to normalized request params.
+    """
+    Apply model-level default args to normalized request params.
 
     Args:
         params (dict): Normalized and expanded request parameters.
@@ -443,7 +485,8 @@ def run_predict_inference(
     is_totalseg: list[bool],
     writing_process_pool: ProcessPool | None,
 ) -> tuple[dict, list[str], list[bool], str, str | None]:
-    """Run ``predict`` and normalize execution result into a common shape.
+    """
+    Run ``predict`` and normalize execution result into a common shape.
 
     Args:
         series_paths (list): Stage-wise input paths passed to ``predict``.
@@ -883,11 +926,19 @@ class nnUNetAPI:
         if isinstance(nnunet_id, str):
             nnunet_id = [nnunet_id]
 
+        initial_default_args = resolve_models(
+            nnunet_id=nnunet_id,
+            model_dictionary=self.model_dictionary,
+            alias_dict=self.alias_dict,
+        )[2]
+        may_inject = get_may_inject(initial_default_args)
+
         nnunet_id, insert_at = expand_cascade_inputs(
             params=params,
             nnunet_id=nnunet_id,
             model_dictionary=self.model_dictionary,
             alias_dict=self.alias_dict,
+            may_inject_series=may_inject,
         )
 
         (
