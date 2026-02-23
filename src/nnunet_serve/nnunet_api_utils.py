@@ -587,8 +587,8 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
     """
     Returns a dict with default parameters. If ``default_args`` is a list of
     dicts, the output will be a dictionary of lists whenever the key is in
-    ``args_with_mult_support`` and whose value will be that of the last
-    dictionary otherwise. If ``default_args`` is a dict the output will be
+    ``CASCADE_ARGUMENTS`` and whose value will be that of the last dictionary
+    otherwise. If ``default_args`` is a dict the output will be
     ``default_args``.
 
     Args:
@@ -596,7 +596,11 @@ def get_default_params(default_args: dict | list[dict]) -> dict:
 
     Returns:
         dict: correctly formatted default arguments.
+
+    Raises:
+        ValueError: if ``default_args`` is not a dict or list of dicts.
     """
+
     default_params_request = {
         k: v
         for k, v in InferenceRequestBase(nnunet_id="", output_dir="")
