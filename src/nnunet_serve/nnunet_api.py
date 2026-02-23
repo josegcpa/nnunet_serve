@@ -29,6 +29,7 @@ from totalsegmentator.map_to_binary import (
 
 from nnunet_serve.api_datamodels import (
     InferenceRequest,
+    InferenceRequestOrthanc,
     InferenceResponse,
     InferenceFileResponse,
     HealthzResponse,
@@ -1134,12 +1135,12 @@ class nnUNetAPI:
             )
 
     async def infer_orthanc(
-        self, inference_request: Annotated[InferenceRequest, Query()]
+        self, inference_request: Annotated[InferenceRequestOrthanc, Query()]
     ):
         """Run inference for Orthanc-backed inputs and push SEG back to Orthanc.
 
         This adapter:
-        1. Downloads Orthanc series referenced in ``series_folders``.
+        1. Downloads Orthanc series referenced in ``series_ids``.
         2. Rewrites ``series_folders`` to local downloaded paths.
         3. Reuses ``infer``.
         4. Uploads produced DICOM SEG files back to Orthanc.
@@ -1156,24 +1157,23 @@ class nnUNetAPI:
         payload["study_path"] = str(inputs_path)
         payload["output_dir"] = str(output_path)
 
-        raw_series_folders = payload.get("series_folders", None)
-        if raw_series_folders is None:
+        raw_series_ids = payload.get("series_ids", None)
+        if raw_series_ids is None:
             return self._raise_or_error_response(
-                error="series_folders must be defined",
+                error="series_ids must be defined",
                 status_code=400,
                 request_payload=payload,
             )
 
-        if isinstance(raw_series_folders, list) and (
-            len(raw_series_folders) == 0
-            or isinstance(raw_series_folders[0], str)
+        if isinstance(raw_series_ids, list) and (
+            len(raw_series_ids) == 0 or isinstance(raw_series_ids[0], str)
         ):
-            series_folders = [raw_series_folders]
+            series_ids = [raw_series_ids]
         else:
-            series_folders = raw_series_folders
+            series_ids = raw_series_ids
 
         orthanc_series_ids = []
-        for stage_series in series_folders:
+        for stage_series in series_ids:
             for sid in stage_series:
                 if isinstance(sid, str) and sid.startswith("from:"):
                     continue
@@ -1191,7 +1191,7 @@ class nnUNetAPI:
                 )
 
         adapted_series_folders = []
-        for stage_series in series_folders:
+        for stage_series in series_ids:
             adapted_stage = []
             for sid in stage_series:
                 if isinstance(sid, str) and sid.startswith("from:"):
@@ -1200,6 +1200,7 @@ class nnUNetAPI:
                     adapted_stage.append(local_series_map[sid])
             adapted_series_folders.append(adapted_stage)
 
+        payload.pop("series_ids", None)
         payload["series_folders"] = adapted_series_folders
 
         try:

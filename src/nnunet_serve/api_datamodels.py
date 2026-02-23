@@ -141,6 +141,22 @@ class InferenceRequest(InferenceRequestBase):
     )
 
 
+class InferenceRequestOrthanc(InferenceRequestBase):
+    series_ids: list[str] | list[list[str]] = Field(
+        description="Series IDs or list of series IDs (relative to study_path).",
+        default=None,
+    )
+    crop_from: str | None = Field(
+        description="Crops input to the bounding box of this mask.",
+        default=None,
+    )
+    intersect_with: str | None = Field(
+        description="Intersects output with this mask and if relative \
+            intersection < min_intersection the object is deleted",
+        default=None,
+    )
+
+
 class InferenceRequestFile(InferenceRequestBase):
     study_path: str | None = Field(
         description="Path to study folder or list of paths to studies.",
