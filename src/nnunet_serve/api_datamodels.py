@@ -162,3 +162,35 @@ class InferenceResponse(BaseModel):
     request: dict
     status: str
     error: str | None
+
+
+class InferenceFileResponse(InferenceResponse):
+    job_id: str
+
+
+class HealthzResponse(BaseModel):
+    status: str
+
+
+class ReadyzResponse(BaseModel):
+    status: str
+    models_loaded: bool
+    gpu_available: bool
+    max_free_mem: int | None
+
+
+class ExpireResponse(BaseModel):
+    status: str
+    message: str
+
+
+class ModelInfoItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class ModelInfoResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class JSONSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
