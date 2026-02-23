@@ -62,6 +62,7 @@ from nnunet_serve.totalseg_utils import (
 from nnunet_serve.seg_writers import SegWriter
 from nnunet_serve.utils import get_gpu_memory, wait_for_gpu
 from nnunet_serve.process_pool import ProcessPool
+from nnunet_serve.orthanc_access import download_series, upload_series
 
 logger = get_logger(__name__)
 
@@ -686,6 +687,12 @@ class nnUNetAPI:
             response_model=InferenceFileResponse,
         )
         self.app.add_api_route(
+            "/infer_orthanc",
+            self.infer_orthanc,
+            methods=["POST"],
+            response_model=InferenceResponse,
+        )
+        self.app.add_api_route(
             "/download/{job_id}",
             self.download_file,
             methods=["GET"],
@@ -1125,6 +1132,105 @@ class nnUNetAPI:
             return JSONResponse(
                 content=error_payload, status_code=response.status_code
             )
+
+    async def infer_orthanc(
+        self, inference_request: Annotated[InferenceRequest, Query()]
+    ):
+        """Run inference for Orthanc-backed inputs and push SEG back to Orthanc.
+
+        This adapter:
+        1. Downloads Orthanc series referenced in ``series_folders``.
+        2. Rewrites ``series_folders`` to local downloaded paths.
+        3. Reuses ``infer``.
+        4. Uploads produced DICOM SEG files back to Orthanc.
+
+        Entries using ``from:`` are preserved as-is to keep cascade behavior.
+        """
+        job_id = uuid.uuid4().hex
+        study_path = get_study_path(job_id)
+        inputs_path = study_path / "inputs"
+        output_path = study_path / "output"
+        inputs_path.mkdir(parents=True, exist_ok=True)
+
+        payload = inference_request.model_dump()
+        payload["study_path"] = str(inputs_path)
+        payload["output_dir"] = str(output_path)
+
+        raw_series_folders = payload.get("series_folders", None)
+        if raw_series_folders is None:
+            return self._raise_or_error_response(
+                error="series_folders must be defined",
+                status_code=400,
+                request_payload=payload,
+            )
+
+        if isinstance(raw_series_folders, list) and (
+            len(raw_series_folders) == 0
+            or isinstance(raw_series_folders[0], str)
+        ):
+            series_folders = [raw_series_folders]
+        else:
+            series_folders = raw_series_folders
+
+        orthanc_series_ids = []
+        for stage_series in series_folders:
+            for sid in stage_series:
+                if isinstance(sid, str) and sid.startswith("from:"):
+                    continue
+                orthanc_series_ids.append(sid)
+
+        local_series_map = {}
+        if len(orthanc_series_ids) > 0:
+            unique_series_ids = sorted(set(orthanc_series_ids))
+            downloaded_paths = download_series(
+                unique_series_ids, output_dir=str(inputs_path)
+            )
+            for sid, folder_path in downloaded_paths.items():
+                local_series_map[sid] = os.path.relpath(
+                    folder_path, inputs_path
+                )
+
+        adapted_series_folders = []
+        for stage_series in series_folders:
+            adapted_stage = []
+            for sid in stage_series:
+                if isinstance(sid, str) and sid.startswith("from:"):
+                    adapted_stage.append(sid)
+                else:
+                    adapted_stage.append(local_series_map[sid])
+            adapted_series_folders.append(adapted_stage)
+
+        payload["series_folders"] = adapted_series_folders
+
+        try:
+            infer_request = InferenceRequest(**payload)
+        except Exception as exc:
+            shutil.rmtree(study_path, ignore_errors=True)
+            return self._raise_or_error_response(
+                error=f"Invalid adapted request payload: {exc}",
+                status_code=422,
+                request_payload=payload,
+            )
+
+        response = await self.infer(infer_request)
+        if response.status_code != 200:
+            shutil.rmtree(study_path, ignore_errors=True)
+            return response
+
+        response_payload = json.loads(response.body)
+        dicom_seg_paths = response_payload.get("dicom_segmentation", [])
+        dicom_seg_paths = [p for p in dicom_seg_paths if p is not None]
+
+        uploaded_instances = []
+        if len(dicom_seg_paths) > 0:
+            uploaded_instances = upload_series(dicom_seg_paths)
+        response_payload["orthanc_upload"] = {
+            "uploaded_instance_count": len(uploaded_instances),
+            "responses": uploaded_instances,
+        }
+
+        shutil.rmtree(study_path, ignore_errors=True)
+        return JSONResponse(content=response_payload, status_code=200)
 
     async def download_file(self, job_id: str):
         """
