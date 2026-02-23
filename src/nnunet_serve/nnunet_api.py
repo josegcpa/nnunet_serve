@@ -11,13 +11,13 @@ from copy import deepcopy
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
-from typing import Any
+from typing import Any, Annotated
 
 import fastapi
 import numpy as np
 import torch
 import yaml
-from fastapi import File, Request, UploadFile
+from fastapi import File, Request, UploadFile, Query
 from fastapi.responses import FileResponse, JSONResponse
 from totalsegmentator.libs import download_pretrained_weights
 from totalsegmentator.map_to_binary import (
@@ -27,7 +27,16 @@ from totalsegmentator.map_to_binary import (
     class_map_parts_headneck_muscles,
 )
 
-from nnunet_serve.api_datamodels import InferenceRequest, InferenceResponse
+from nnunet_serve.api_datamodels import (
+    InferenceRequest,
+    InferenceResponse,
+    InferenceFileResponse,
+    HealthzResponse,
+    ReadyzResponse,
+    ExpireResponse,
+    JSONSchema,
+    ModelInfoResponse,
+)
 from nnunet_serve.file_utils import (
     get_study_path,
     store_uploaded_file,
@@ -674,7 +683,7 @@ class nnUNetAPI:
             "/infer_file",
             self.infer_file,
             methods=["POST"],
-            response_model=dict[str, Any],
+            response_model=InferenceFileResponse,
         )
         self.app.add_api_route(
             "/download/{job_id}",
@@ -686,37 +695,37 @@ class nnUNetAPI:
             "/model_info",
             self.model_info,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=ModelInfoResponse,
         )
         self.app.add_api_route(
             "/model_info_clean",
             self.model_info_clean,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=ModelInfoResponse,
         )
         self.app.add_api_route(
             "/request-params",
             self.request_params,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=JSONSchema,
         )
         self.app.add_api_route(
             "/healthz",
             self.healthz,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=HealthzResponse,
         )
         self.app.add_api_route(
             "/readyz",
             self.readyz,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=ReadyzResponse,
         )
         self.app.add_api_route(
             "/expire",
             self.expire,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=ExpireResponse,
         )
 
     def expire(self):
@@ -874,9 +883,15 @@ class nnUNetAPI:
         )
 
     async def healthz(self):
+        """
+        Returns a simple health check.
+        """
         return {"status": "ok"}
 
     async def readyz(self):
+        """
+        Returns a readiness check.
+        """
         models_loaded = len(self.model_dictionary) > 0
         gpu_available = False
         max_free_mem = None
@@ -900,7 +915,9 @@ class nnUNetAPI:
             "max_free_mem": max_free_mem,
         }
 
-    async def infer(self, inference_request: InferenceRequest):
+    async def infer(
+        self, inference_request: Annotated[InferenceRequest, Query()]
+    ):
         """
         Performs inference.
 
@@ -1110,7 +1127,9 @@ class nnUNetAPI:
             )
 
     async def download_file(self, job_id: str):
-        """Serve the zip file created for ``job_id``.
+        """
+        Serve the zip file created for ``job_id`` (``job_id`` is the value returned by
+        the ``infer_file`` endpoint).
         Returns 404 if the ``job_id`` is unknown or the file has been cleaned up.
         """
         zip_path = self._get_zip_path(job_id)
