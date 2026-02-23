@@ -1,6 +1,6 @@
 """
-pydicom_seg [1] dependencies are conflicting with recent pydantic/fastmcp
-versions so we have to have them here to avoid conflicts.
+pydicom_seg [1] dependencies are conflicting with recent pydantic versions
+so we have to have them here to avoid conflicts.
 
 [1] https://github.com/razorx89/pydicom-seg
 """
