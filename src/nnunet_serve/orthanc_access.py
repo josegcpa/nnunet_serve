@@ -4,7 +4,6 @@ from typing import Any
 from io import BytesIO
 from requests.auth import HTTPBasicAuth
 from zipfile import ZipFile
-from fastmcp.exceptions import ToolError
 
 ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://localhost:8042")
 ORTHANC_USER = os.environ.get("ORTHANC_USER", None)
@@ -26,7 +25,7 @@ except requests.exceptions.RequestException as e:
 def fail_if_orthanc_not_available(func):
     def decorator(*args, **kwargs):
         if not ORTHANC_AVAILABLE:
-            raise ToolError("Orthanc is not available")
+            raise Exception("Orthanc is not available")
         return func(*args, **kwargs)
 
     return decorator
@@ -185,6 +184,37 @@ def upload_instance(instance_path: str):
     )
     response.raise_for_status()
     return response.text
+
+
+@fail_if_orthanc_not_available
+def upload_series(series_path: str | list[str]) -> list[str]:
+    """
+    Upload one or multiple DICOM series to Orthanc.
+
+    Args:
+        series_path (str | list[str]): Path(s) to either DICOM files or
+            directories containing DICOM files.
+
+    Returns:
+        list[str]: Orthanc responses returned by ``upload_instance``.
+    """
+    if isinstance(series_path, str):
+        series_path = [series_path]
+
+    instance_paths = []
+    for path in series_path:
+        if os.path.isdir(path):
+            for file_name in sorted(os.listdir(path)):
+                file_path = os.path.join(path, file_name)
+                if os.path.isfile(file_path):
+                    instance_paths.append(file_path)
+        elif os.path.isfile(path):
+            instance_paths.append(path)
+
+    responses = []
+    for instance_path in instance_paths:
+        responses.append(upload_instance(instance_path))
+    return responses
 
 
 @fail_if_orthanc_not_available
