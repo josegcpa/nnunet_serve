@@ -13,6 +13,7 @@ import numpy as np
 import uuid
 import SimpleITK as sitk
 import torch
+import numpy.core.multiarray as multiarray
 from cachetools import TTLCache
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from batchgenerators.dataloading.multi_threaded_augmenter import (
@@ -42,10 +43,23 @@ from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
 from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 from nnunet_serve.process_pool import ProcessPool
 
+
 logger = get_logger(__name__)
 SUCCESS_STATUS = "done"
 FAILURE_STATUS = "failed"
 CACHE = TTLCache(maxsize=4, ttl=300)
+SAFE_GLOBALS = [
+    multiarray.scalar,
+    np._core.multiarray.scalar,
+    np.core.multiarray.scalar,
+    np.dtype,
+    np.ndarray,
+    np.dtypes.Float64DType,
+    np.dtypes.Float32DType,
+    type(np.float64(0)),
+    np.generic,
+]
+torch.serialization.add_safe_globals(SAFE_GLOBALS)
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor  # noqa
 
@@ -688,11 +702,12 @@ def load_predictor(
     )
     if isinstance(checkpoint_name, CheckpointName):
         checkpoint_name = checkpoint_name.value
-    predictor.initialize_from_trained_model_folder(
-        nnunet_path,
-        use_folds=use_folds,
-        checkpoint_name=checkpoint_name,
-    )
+    with torch.serialization.safe_globals(SAFE_GLOBALS):
+        predictor.initialize_from_trained_model_folder(
+            nnunet_path,
+            use_folds=use_folds,
+            checkpoint_name=checkpoint_name,
+        )
     CACHE[args_hash] = predictor
     return predictor
 
@@ -891,6 +906,8 @@ def process_proba_array(
         proba_array = np.moveaxis(proba_array, 0, -1)
         mask = sitk.GetImageFromArray(mask.astype(np.uint32))
         mask.CopyInformation(input_image)
+        proba_map = sitk.GetImageFromArray(proba_array)
+        proba_map = copy_information_nd(proba_map, input_image)
     else:
         if isinstance(class_idx, int):
             proba_array = proba_array[class_idx]
@@ -1175,9 +1192,23 @@ def single_model_inference(
         )
 
     if probability_map is not None:
-        probability_map = (
-            sitk.Cast(mask, probability_map.GetPixelID()) * probability_map
-        )
+        if probability_map.GetNumberOfComponentsPerPixel() > 1:
+            logger.info("Treating probability map as vector pixel type")
+            f = sitk.LabelShapeStatisticsImageFilter()
+            f.Execute(mask)
+            select_f = sitk.VectorIndexSelectionCastImageFilter()
+            out_proba_map = []
+            for i in f.GetLabels():
+                select_f.SetIndex(i)
+                pmap = select_f.Execute(probability_map)
+                pmap = sitk.Cast(mask == i, pmap.GetPixelID()) * pmap
+                out_proba_map.append(pmap)
+            compose_filter = sitk.ComposeImageFilter()
+            probability_map = compose_filter.Execute(*out_proba_map)
+        else:
+            probability_map = (
+                sitk.Cast(mask, probability_map.GetPixelID()) * probability_map
+            )
 
     logger.info("Finished processing masks")
 
