@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Annotated
 
 import fastapi
-import numpy as np
 import torch
 import yaml
 from fastapi import File, Request, UploadFile, Query
@@ -49,6 +48,7 @@ from nnunet_serve.nnunet_api_utils import (
     FAILURE_STATUS,
     SUCCESS_STATUS,
     CACHE,
+    SAFE_GLOBALS,
     CASCADE_ARGUMENTS,
     get_default_params,
     get_info,
@@ -67,15 +67,7 @@ from nnunet_serve.orthanc_access import download_series, upload_series
 
 logger = get_logger(__name__)
 
-
-torch.serialization.add_safe_globals(
-    [
-        np._core.multiarray.scalar,
-        np.dtype,
-        np.dtypes.Float64DType,
-        np.dtypes.Float32DType,
-    ]
-)
+torch.serialization.add_safe_globals(SAFE_GLOBALS)
 
 class_map.update(
     {
