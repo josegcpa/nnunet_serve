@@ -104,7 +104,9 @@ def copy_information_nd(
 
 
 def filter_by_bvalue(
-    dicom_files: list, target_bvalue: int, exact: bool = False
+    dicom_files: list,
+    target_bvalue: int,
+    exact: bool = False,
 ) -> list:
     """
     Selects the DICOM values with a b-value which is exactly or closest to
@@ -162,6 +164,77 @@ def filter_by_bvalue(
         0
     ]
     dicom_files = [f for f, b in zip(dicom_files, bvalues) if b == best_bvalue]
+    return dicom_files
+
+
+def filter_by_bvalue_from_dict(
+    dicom_files: dict,
+    target_bvalue: int,
+    exact: bool = False,
+) -> list:
+    """
+    Selects the DICOM values with a b-value which is exactly or closest to
+    target_bvalue (depending on whether exact is True or False).
+
+    Args:
+        dicom_files (list): list of pydicom file objects.
+        target_bvalues (int): the expected b-value.
+        exact (bool, optional): whether the b-value matching is to be exact
+            (raises error if exact target_bvalue is not available) or
+            approximate returns the b-value which is closest to target_bvalue.
+
+    Returns:
+        list: list of b-value-filtered pydicom file objects.
+    """
+    BVALUE_TAG = ("0018", "9087")
+    SIEMENS_BVALUE_TAG = ("0019", "100c")
+    GE_BVALUE_TAG = ("0043", "1039")
+    bvalues = []
+    logger.info(f"Filtering by b-value using {target_bvalue}")
+    for k, d in dicom_files.items():
+        curr_bvalue = None
+        bvalue = d.get(BVALUE_TAG, None)
+        siemens_bvalue = d.get(SIEMENS_BVALUE_TAG, None)
+        ge_bvalue = d.get(GE_BVALUE_TAG, None)
+        if bvalue is not None:
+            curr_bvalue = bvalue.value
+        elif siemens_bvalue is not None:
+            curr_bvalue = siemens_bvalue.value
+        elif ge_bvalue is not None:
+            curr_bvalue = ge_bvalue.value
+            if isinstance(curr_bvalue, bytes):
+                curr_bvalue = curr_bvalue.decode()
+            curr_bvalue = str(curr_bvalue)
+            if "[" in curr_bvalue and "]" in curr_bvalue:
+                curr_bvalue = (
+                    curr_bvalue.strip().strip("[").strip("]").split(",")
+                )
+                curr_bvalue = [int(x) for x in curr_bvalue]
+            if isinstance(curr_bvalue, list) is False:
+                curr_bvalue = curr_bvalue.split("\\")
+                curr_bvalue = str(curr_bvalue[0])
+            else:
+                curr_bvalue = str(curr_bvalue[0])
+            if len(curr_bvalue) > 5:
+                curr_bvalue = curr_bvalue[-4:]
+        if curr_bvalue is None:
+            curr_bvalue = 0
+        bvalues.append(int(curr_bvalue))
+    unique_bvalues = set(bvalues)
+    if len(unique_bvalues) in [0, 1]:
+        return dicom_files
+    logger.info(f"Detected {len(unique_bvalues)} unique b-values")
+    if (target_bvalue not in unique_bvalues) and (exact is True):
+        raise RuntimeError("Requested b-value not available")
+    best_bvalue = sorted(unique_bvalues, key=lambda b: abs(b - target_bvalue))[
+        0
+    ]
+    logger.info(f"Keeping instances with b-value={best_bvalue}")
+    dicom_files = {
+        k: d
+        for (k, d), b in zip(dicom_files.items(), bvalues)
+        if b == best_bvalue
+    }
     return dicom_files
 
 
@@ -308,7 +381,11 @@ def sort_dicom_slices(file_paths: list[str]) -> list[str]:
     return [file_paths[i] for i in order]
 
 
-def read_dicom_as_sitk(file_path: str, metadata: dict[str, str] = {}):
+def read_dicom_as_sitk(
+    file_path: str,
+    metadata: dict[str, str] = {},
+    bvalue_for_filtering: int | None = None,
+) -> sitk.Image:
     """
     Reads a DICOM series as an SITK file.
 
@@ -321,20 +398,35 @@ def read_dicom_as_sitk(file_path: str, metadata: dict[str, str] = {}):
         sitk.Image: SITK image.
     """
 
+    def check_is_good(f):
+        """
+        Checks whether a DICOM file has the appropriate tags.
+
+        Args:
+            f (pydicom.Dataset):
+        """
+        if ((0x0020, 0x0037) in f) and ((0x0020, 0x0032) in f):
+            return True
+        return False
+
     reader = sitk.ImageSeriesReader()
     dicom_file_names = reader.GetGDCMSeriesFileNames(file_path)
-    fs = []
     good_file_paths = {}
-    for dcm_file in dicom_file_names:
-        f = dcmread(dcm_file)
-        acquisition_number = f[0x0020, 0x0012].value
-        if ((0x0020, 0x0037) in f) and ((0x0020, 0x0032) in f):
-            fs.append(f)
-            if acquisition_number not in good_file_paths:
-                good_file_paths[acquisition_number] = []
-            good_file_paths[acquisition_number].append(dcm_file)
-    if len(good_file_paths) == 0:
+    dicom_file_dict = {f: dcmread(f) for f in dicom_file_names}
+    dicom_file_dict = {
+        k: v for k, v in dicom_file_dict.items() if check_is_good(v)
+    }
+    if len(dicom_file_dict) == 0:
         raise RuntimeError(f"No DICOM files found in {file_path}")
+    if bvalue_for_filtering:
+        dicom_file_dict = filter_by_bvalue_from_dict(
+            dicom_file_dict, bvalue_for_filtering, exact=False
+        )
+    for dcm_file, f in dicom_file_dict.items():
+        acquisition_number = f[0x0020, 0x0012].value
+        if acquisition_number not in good_file_paths:
+            good_file_paths[acquisition_number] = []
+        good_file_paths[acquisition_number].append(dcm_file)
     good_file_paths = [
         good_file_paths[k] for k in sorted(good_file_paths.keys())
     ][0]

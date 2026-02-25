@@ -152,12 +152,20 @@ class SeriesLoader:
     Args:
         series_paths (list[list[str]]): Nested list of series identifiers grouped by
             "stage". Each inner list is the set of series to be used at that stage.
-        is_dicom (bool): If `True`, each series path is treated as a DICOM
+        is_dicom (bool, optional): If `True`, each series path is treated as a DICOM
             directory and read with `read_dicom_as_sitk`. If `False`, each series
             path is read using `sitk.ReadImage`.
+        bvalue_for_filtering (int | None, optional): If provided when `is_dicom=True`,
+            filters DICOM series by the specified b-value using `filter_by_bvalue`.
+            Defaults to None.
     """
 
-    def __init__(self, series_paths: list[list[str]], is_dicom: bool = False):
+    def __init__(
+        self,
+        series_paths: list[list[str]],
+        is_dicom: bool = False,
+        bvalue_for_filtering: int | None = None,
+    ):
         """
         Create a loader and pre-compute the unique series paths.
 
@@ -168,6 +176,7 @@ class SeriesLoader:
         """
         self.series_paths = series_paths
         self.is_dicom = is_dicom
+        self.bvalue_for_filtering = bvalue_for_filtering
 
         self.n_stages = len(self.series_paths)
         self.unique_series_paths = []
@@ -199,10 +208,11 @@ class SeriesLoader:
         if path not in self.loaded_volumes:
             if self.is_dicom:
                 if os.path.isdir(path):
-                    (
-                        self.loaded_volumes[path],
-                        self.good_file_paths[path],
-                    ) = read_dicom_as_sitk(path)
+                    dcm_img = read_dicom_as_sitk(
+                        path, bvalue_for_filtering=self.bvalue_for_filtering
+                    )
+                    self.loaded_volumes[path] = dcm_img[0]
+                    self.good_file_paths[path] = dcm_img[1]
                 else:
                     self.loaded_volumes[path] = sitk.ReadImage(path)
                     self.good_file_paths[path] = None
@@ -760,6 +770,7 @@ def predict(
         "min_intersection",
         "cascade_mode",
         "flip_xy",
+        "bvalue_for_filtering",
     ]
     export_param_names = [
         "output_dir",
@@ -921,7 +932,9 @@ def process_proba_array(
             intersect_with=intersect_with,
             min_intersection=min_intersection,
         )
-        mask = proba_array > proba_threshold
+        mask = np.where(
+            proba_array > proba_threshold, int(np.min(class_idx)), 0
+        )
         proba_map = sitk.GetImageFromArray(proba_array)
         proba_map = copy_information_nd(proba_map, input_image)
         mask = sitk.GetImageFromArray(mask.astype(np.uint32))
@@ -1249,6 +1262,7 @@ def multi_model_inference(
         float | tuple[float] | list[float] | None
     ) = None,
     flip_xy: bool = False,
+    bvalue_for_filtering: int | None = None,
     min_mem: int | None = None,
 ):
     """
@@ -1289,6 +1303,8 @@ def multi_model_inference(
             it is considered as a percentage of the maximum object size. Defaults to None.
         flip_xy (bool, optional): whether to flip the x and y axes of the input.
             TotalSegmentator does this for some reason. Defaults to False.
+        bvalue_for_filtering (int | None, optional): b-value to filter DICOM files by.
+            Defaults to None.
         min_mem (int | None, optional): minimum amount of free memory required to
             use the GPU. Only used when ``device_id`` is None. Defaults to None.
     """
@@ -1343,7 +1359,9 @@ def multi_model_inference(
         logger.info("Using min_confidence %s for inference", min_confidence)
         logger.info("Using checkpoint_name %s for inference", checkpoint_name)
 
-        series_loader = SeriesLoader(series_paths, is_dicom)
+        series_loader = SeriesLoader(
+            series_paths, is_dicom, bvalue_for_filtering=bvalue_for_filtering
+        )
         all_predictions = []
         all_proba_maps = []
         intersect_with_class_idx = 1
@@ -1387,7 +1405,9 @@ def multi_model_inference(
         else:
             good_file_paths = None
     else:
-        series_loader = SeriesLoader(series_paths, is_dicom)
+        series_loader = SeriesLoader(
+            series_paths, is_dicom, bvalue_for_filtering=bvalue_for_filtering
+        )
         mask, proba_map = single_model_inference(
             nnunet_path=nnunet_path,
             volumes=series_loader.get_volumes(0),

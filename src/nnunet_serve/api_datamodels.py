@@ -89,6 +89,11 @@ class InferenceRequestBase(BaseModel):
     save_rt_struct_output: bool = Field(
         description="Saves the output as an RT struct file", default=False
     )
+    bvalue_for_filtering: int | float | None = Field(
+        description="Filters instances using the b-value closest to "
+        "bvalue_for_filtering if any is identified in the series",
+        default=None,
+    )
     suffix: str | None = Field(
         description="Suffix for predictions", default=None
     )
