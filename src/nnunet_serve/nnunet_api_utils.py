@@ -1098,8 +1098,6 @@ def single_model_inference(
         )
     output_padding = None
     if crop_from is not None:
-        logger.info("Cropping input")
-        logger.info("Input size (before cropping): %s", volumes[0].GetSize())
         if isinstance(crop_from, str):
             crop_from = sitk.ReadImage(crop_from)
         crop_from = filter_labels(crop_from, crop_class_idx, True)
@@ -1107,7 +1105,6 @@ def single_model_inference(
         volumes = [
             v[bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]] for v in volumes
         ]
-        logger.info("Input size (after cropping): %s", volumes[0].GetSize())
 
     logger.info("Resampling input images to nnUNet model spacing")
     logger.info("Input size (before resampling): %s", volumes[0].GetSize())
