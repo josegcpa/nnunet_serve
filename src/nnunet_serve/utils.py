@@ -888,7 +888,7 @@ def make_parser(
             {
                 "help": "Padding to be added to the cropped region.",
                 "default": (10, 10, 10),
-                "type": int,
+                "type": int | float,
                 "nargs": "+",
             },
         ),
