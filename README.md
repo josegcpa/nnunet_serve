@@ -30,6 +30,7 @@ Model configuration makes use of `model-serve-spec.yaml`. This is a relatively s
     - `{ path: <path/to/metadata.json> }` to a DCMQI template file, or
     - an inline object with keys such as `algorithm_name`, `segment_names`, etc. (see examples in `model-serve-spec.yaml`). When both are provided, `metadata.path` takes precedence.
   - **`min_mem`**: minimum free GPU memory in MiB to start (`wait_for_gpu`).
+  - **`is_totalseg`**: boolean flag to indicate if the model is a TotalSegmentator model. This is important as there are some peculariaties to TotalSegmentator models that are handled differently (e.g., weights are auto-downloaded and `metadata` is auto-derived).
   - **`default_args`**: defaults for request parameters (e.g., `series_folders`, `use_folds`, `proba_threshold`, `min_confidence`, `tta`, `save_proba_map`, `checkpoint_name`, etc.). When multiple models are requested, list-valued defaults are merged per model (see `get_default_params()` in `nnunet_serve_utils.py`).
   - For TotalSegmentator tasks, you can specify `totalseg_task` (e.g., `total_fastest`); weights are auto-downloaded and `metadata` is auto-derived.
 
@@ -250,7 +251,7 @@ Refer to `src/nnunet_serve/entrypoints/entrypoint_batch.py` for the full impleme
 
 ### API
 
-This repository includes a FastAPI server that exposes nnU-Net inference as an HTTP API. The server is implemented in `src/nnunet_serve/nnunet_serve_api.py` and configured by `model-serve-spec.yaml`.
+This repository includes a FastAPI server that exposes nnU-Net inference as an HTTP API. The server is implemented in `src/nnunet_serve/nnunet_api.py` (with the application entrypoint in `src/nnunet_serve/nnunet_serve_api.py`) and configured by `model-serve-spec.yaml`.
 
 #### Model caching
 
@@ -439,6 +440,10 @@ curl -X POST http://localhost:12345/infer \
 - **CORS:** No CORS middleware is configured by default. If you expose the API to browsers, configure CORS as appropriate for your deployment.
 - **Debug mode:** Set environment variable `DEBUG=1` to disable try/except around inference.
 
+## Developer Documentation
+
+The codebase follows **Google-style docstrings** for all functions and classes. If you are a developer looking to extend `nnunet_serve`, you can find detailed documentation for all core modules in the `src/nnunet_serve` directory.
+
 # Citation
 
 If you use this repository please cite the Zenodo repository as below.
@@ -446,20 +451,20 @@ If you use this repository please cite the Zenodo repository as below.
 **APA**
 
 ```
-de Almeida, J. G., & Papanikolaou, N. (2025). josegcpa/nnunet_serve: v0.1 (v0.1). Zenodo. https://doi.org/10.5281/zenodo.17522203
+de Almeida, J. G., & Papanikolaou, N. (2026). josegcpa/nnunet_serve: v0.1.2 (v0.1.2). Zenodo. https://doi.org/10.5281/zenodo.17522203
 ```
 
 **BibTex**
 
 ```
-@software{de_almeida_2025_17522203,
+@software{de_almeida_2026_17522203,
   author       = {de Almeida, José Guilherme and
                   Papanikolaou, Nikolaos},
-  title        = {josegcpa/nnunet\_serve: v0.1},
-  month        = nov,
-  year         = 2025,
+  title        = {josegcpa/nnunet\_serve: v0.1.2},
+  month        = feb,
+  year         = 2026,
   publisher    = {Zenodo},
-  version      = {v0.1},
+  version      = {v0.1.2},
   doi          = {10.5281/zenodo.17522203},
   url          = {https://doi.org/10.5281/zenodo.17522203},
   swhid        = {swh:1:dir:af8aa6feda0eb9a33d98a4629a978bc289ad9537
