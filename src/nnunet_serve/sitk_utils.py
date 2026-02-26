@@ -3,6 +3,10 @@ import SimpleITK as sitk
 from scipy import ndimage
 from typing import Sequence
 
+from nnunet_serve.logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 def resample_image_to_target(
     moving: sitk.Image,
@@ -169,7 +173,12 @@ def from_closest_canonical_sitk(
 def get_crop(
     image: str | sitk.Image,
     target_image: sitk.Image | None = None,
-    crop_padding: tuple[int, int, int] | None = (10, 10, 10),
+    crop_padding: tuple[int | float, int | float, int | float]
+    | None = (
+        10,
+        10,
+        10,
+    ),
     min_size: tuple[int, int, int] | None = None,
 ) -> tuple[int, int, int, int, int, int]:
     """
@@ -186,6 +195,8 @@ def get_crop(
     Returns:
         tuple[int, int, int, int, int, int]: bounding box of the label.
     """
+    logger.info("Cropping input")
+    logger.info("Input size (before cropping): %s", image.GetSize())
     if isinstance(image, str):
         image = sitk.ReadImage(image)
     if target_image is not None:
@@ -199,6 +210,11 @@ def get_crop(
     start, size = bounding_box[:3], bounding_box[3:]
 
     if crop_padding is not None:
+        crop_padding = [
+            c if isinstance(c, int) else int(c * s)
+            for c, s in zip(crop_padding, size)
+        ]
+        logger.info("Crop padding: %s", crop_padding)
         start = tuple([max(start[i] - crop_padding[i], 0) for i in range(3)])
         size = tuple(
             [
@@ -233,5 +249,9 @@ def get_crop(
         target_image_size[2] - bounding_box[5],
     ]
     output_padding = list(map(int, output_padding))
+
+    logger.info("Output bounding box corner: %s", bounding_box[:3])
+    logger.info("Output bounding box size: %s", bounding_box[3:])
+    logger.info("Output padding: %s", output_padding)
 
     return bounding_box, output_padding
