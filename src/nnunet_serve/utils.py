@@ -636,10 +636,14 @@ def extract_lesion_candidates(
         min_confidence = threshold
 
     if intersect_with is not None:
-        logger.info(f"Intersecting with {intersect_with}")
         if isinstance(intersect_with, str):
+            logger.info(f"Intersecting with %s", intersect_with)
             intersect_with = sitk.ReadImage(intersect_with)
         if isinstance(intersect_with, sitk.Image):
+            logger.info(
+                f"Intersecting with image with size %s",
+                intersect_with.GetSize(),
+            )
             intersect_with = sitk.GetArrayFromImage(intersect_with)
 
     for idx in range(1, num_blobs + 1):
