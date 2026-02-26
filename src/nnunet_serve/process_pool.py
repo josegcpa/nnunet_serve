@@ -31,9 +31,31 @@ class ProcessPool:
             self.processes.append(p)
 
     def fn(self, *args, **kwargs):
+        """
+        Placeholder for the function to be executed in the pool.
+
+        This method must be overridden by subclasses to implement specific
+        processing logic.
+
+        Args:
+            *args: Positional arguments for the function.
+            **kwargs: Keyword arguments for the function.
+
+        Raises:
+            NotImplementedError: If not overridden by a subclass.
+        """
+
         raise NotImplementedError
 
     def run_case(self, input_queue: Queue, output_queue: Queue):
+        """
+        Worker loop that processes cases from the input queue.
+
+        Args:
+            input_queue (Queue): Queue containing case dictionaries with
+                'identifier', 'args', and 'kwargs'.
+            output_queue (Queue): Queue for storing the results of processed cases.
+        """
         while True:
             case = input_queue.get()
             if case is None:
@@ -85,6 +107,8 @@ class ProcessPool:
         logger.debug("Process pool closed")
 
     def __del__(self):
+        """
+        Ensures the process pool is closed when the instance is deleted."""
         try:
             self.close()
         except ValueError:
@@ -97,4 +121,15 @@ class WritingProcessPool(ProcessPool):
     """
 
     def fn(self, identifier: int, *args, **kwargs):
+        """
+        Executes export_predictions for a given case.
+
+        Args:
+            identifier (int): Identifier of the case.
+            *args: Positional arguments for export_predictions.
+            **kwargs: Keyword arguments for export_predictions.
+
+        Returns:
+            tuple: (identifier, result_of_export_predictions)
+        """
         return identifier, export_predictions(*args, **kwargs)

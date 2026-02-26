@@ -40,6 +40,16 @@ N_FRACTIONAL = 10
 
 
 def strip_laterality(name: str) -> str:
+    """
+    Strips laterality indicators (left/right) from a string.
+
+    Args:
+        name (str): The string to process.
+
+    Returns:
+        str: The string without laterality indicators.
+    """
+
     name = re.sub("[ _]*[lL]eft[ _]*", "", name)
     name = re.sub("[ _]*[rR]ight[ _]*", "", name)
     name = name.strip()
@@ -47,6 +57,15 @@ def strip_laterality(name: str) -> str:
 
 
 def process_name(name: str) -> str:
+    """
+    Processes a name by stripping laterality and extra spaces.
+
+    Args:
+        name (str): The name to process.
+
+    Returns:
+        str: The processed name.
+    """
     name = strip_laterality(name)
     name = re.sub("[ _]+", "", name)
     name = name.strip()
@@ -225,9 +244,11 @@ def one_hot_encode(arr: np.ndarray, n_labels: int) -> np.ndarray:
 
     Args:
         arr (np.ndarray): numpy array to be converted.
+        n_labels (int): Number of labels for encoding.
 
     Returns:
-        np.ndarray: one-hot encoded numpy array.
+        np.ndarray: one-hot encoded numpy array of shape
+            (*arr.shape, n_labels).
     """
     output_arr = np.zeros([*arr.shape, n_labels])
     for i in range(1, n_labels + 1):
@@ -294,6 +315,32 @@ def save_mask_as_rtstruct(
 
 @dataclass
 class SegWriter:
+    """
+    Helper class to manage DICOM Segmentation (SEG) and RT-Struct export.
+
+    This class handles the conversion of prediction masks into standardized
+    DICOM formats, including metadata management for algorithms and segments.
+
+    Attributes:
+        algorithm_name (str): Name of the segmentation algorithm.
+        segment_names (list[str | dict[str, str]], optional): Names or dicts
+            describing the segments.
+        segment_descriptions (list[hd.seg.SegmentDescription], optional):
+            High-level segment descriptions.
+        algorithm_version (str): Version string of the algorithm.
+        algorithm_family (Code): DICOM code for the algorithm family.
+        algorithm_type (SegmentAlgorithmTypeValues): DICOM algorithm type.
+        instance_number (int): DICOM instance number.
+        series_number (int): DICOM series number.
+        manufacturer (str): Manufacturer name for DICOM metadata.
+        manufacturer_model_name (str): Model name for DICOM metadata.
+        series_description (str): Description for the DICOM series.
+        clinical_trial_series_id (str): Clinical trial series ID.
+        clinical_trial_time_point_id (str): Clinical trial time point ID.
+        body_part_examined (str): Body part examined for DICOM metadata.
+        validate (bool): Whether to perform validation on init.
+    """
+
     algorithm_name: str
     segment_names: list[str | dict[str, str]] | None = None
     segment_descriptions: list[hd.seg.SegmentDescription] | None = None
@@ -391,6 +438,15 @@ class SegWriter:
     def to_array_if_necessary(
         self, mask: np.ndarray | sitk.Image
     ) -> np.ndarray:
+        """
+        Converts a mask to a numpy array if the mask is a sitk.Image.
+
+        Args:
+            mask (np.ndarray | sitk.Image): the mask to convert.
+
+        Returns:
+            np.ndarray: the mask as a numpy array.
+        """
         if isinstance(mask, sitk.Image):
             mask = sitk.GetArrayFromImage(mask)
         return mask
@@ -586,6 +642,17 @@ class SegWriter:
         source_files: list[str],
         output_path: str,
     ):
+        """
+        Routine to write a DICOM RTstruct object.
+
+        Args:
+            mask_array (np.ndarray | sitk.Image): mask image.
+            source_files (list[str]): list of source files.
+            output_path (str): output path.
+
+        Returns:
+            str: "success" if the operation was successful.
+        """
         mask_array = self.to_array_if_necessary(mask_array)
         segment_info = [
             [s.SegmentLabel, list(random_color_generator())]
@@ -607,6 +674,21 @@ class SegWriter:
         manufacturer: str = "Algorithm",
         manufacturer_model_name: str = "AlgorithmModel",
     ):
+        """
+        Uses a DCMQI metadata file generated using [1] to initialize a
+        SegWriter.
+
+        [1] https://qiicr.org/dcmqi/#/seg
+
+        Args:
+            metadata_file (str): path to the DCMQI metadata file.
+            algorithm_version (str): algorithm version.
+            manufacturer (str): manufacturer.
+            manufacturer_model_name (str): manufacturer model name.
+
+        Returns:
+            SegWriter: initialized SegWriter.
+        """
         metadata = from_dcmqi_metainfo(metadata_file)
         segments = list(metadata.SegmentSequence)
         algorithm_name = segments[0].SegmentAlgorithmName
@@ -637,6 +719,20 @@ class SegWriter:
     def init_from_metadata_dict(
         metadata: dict[str, str], validate: bool = False
     ):
+        """
+        Initializes a SegWriter from a metadata dictionary. It automatically
+        detects the type of metadata and calls the appropriate initialization
+        method. If there is a "path" key, it is assumed to be a DCMQI metadata
+        file and the init_from_dcmqi_metadata_file method is called. Otherwise,
+        the constructor is called directly.
+
+        Args:
+            metadata (dict[str, str]): metadata dictionary.
+            validate (bool): whether to validate the metadata.
+
+        Returns:
+            SegWriter: initialized SegWriter.
+        """
         if "path" in metadata:
             return SegWriter.init_from_dcmqi_metadata_file(metadata["path"])
         else:

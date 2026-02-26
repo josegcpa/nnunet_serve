@@ -78,7 +78,16 @@ CASCADE_ARGUMENTS = [
 
 @dataclass
 class LabelSubsetState:
-    """Holds temporary label-manager state used for class-subset inference."""
+    """Holds temporary label-manager state used for class-subset inference.
+
+    Attributes:
+        prediction_indices (list[int]): Indices of the classes to be kept in the
+            prediction.
+        used_labels (list[int]): List of unique labels that are active in the
+            current subset.
+        correspondence_dict (dict[int, int]): Mapping from subset label indices
+            to original labels.
+    """
 
     prediction_indices: list[int]
     used_labels: list[int]
@@ -94,12 +103,25 @@ class LabelManagerAdapter:
     """
 
     def __init__(self, label_manager: LabelManager):
+        """Initializes the adapter with a given LabelManager.
+
+        Args:
+            label_manager (LabelManager): The nnU-Net LabelManager to adapt.
+        """
         self.label_manager = label_manager
 
     def build_subset_state(
         self, class_idx: int | list[int]
     ) -> LabelSubsetState:
-        """Build the temporary label mapping state for a class subset."""
+        """Build the temporary label mapping state for a class subset.
+
+        Args:
+            class_idx (int | list[int]): The index or indices of the
+                classes to include.
+
+        Returns:
+            LabelSubsetState: The constructed subset state for inference.
+        """
         if isinstance(class_idx, int):
             class_idx = [class_idx]
         used_labels = [0, *class_idx]
@@ -124,7 +146,15 @@ class LabelManagerAdapter:
 
     @contextmanager
     def apply_subset_state(self, subset_state: LabelSubsetState):
-        """Temporarily apply subset labels and always restore original state."""
+        """
+        Temporarily apply subset labels and always restore original state.
+
+        Args:
+            subset_state (LabelSubsetState): The state to apply during the context.
+
+        Yields:
+            None: Allows execution within the modified label manager state.
+        """
         old_labels = self.label_manager._all_labels
         old_regions = self.label_manager._regions
         self.label_manager._all_labels = subset_state.used_labels
@@ -227,10 +257,22 @@ class SeriesLoader:
         return volume, good_file_paths
 
     def __setitem__(self, key: str, value: sitk.Image):
+        """Manually set/cache a volume for a given path.
+
+        Args:
+            key (str): The series identifier or path.
+            value (sitk.Image): The SimpleITK image to cache.
+        """
         self.loaded_volumes[key] = value
         self.good_file_paths[key] = None
 
     def register(self, image: sitk.Image, stage: int):
+        """Registers an image for a specific stage.
+
+        Args:
+            image (sitk.Image): The image to register.
+            stage (int): The stage index to associate the image with.
+        """
         key = os.path.join(f"stage_{stage}", "prediction.nii.gz")
         self[key] = image
 
@@ -571,7 +613,10 @@ def get_series_paths(
             model is run.
 
     Returns:
-        tuple[list[str], str, str] | tuple[list[list[str]], str, str]: _description_
+        tuple[list[str] | list[list[str]], str, str]: A tuple containing:
+            - series_paths (list[str] | list[list[str]]): The resolved complete paths.
+            - status (str): SUCCESS_STATUS or FAILURE_STATUS.
+            - error (str | None): Error message if status is FAILURE_STATUS.
     """
 
     def _get_path(study_path: str, x: str | Path) -> str:

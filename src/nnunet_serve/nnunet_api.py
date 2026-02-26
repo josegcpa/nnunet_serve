@@ -92,7 +92,13 @@ TOTAL_SEG_SNOMED_MAPPING = load_snomed_mapping_expanded()
 
 def make_json_serializable(obj):
     """
-    Makes an object JSON serializable.
+    Makes an object JSON serializable by converting Path and nested structures.
+
+    Args:
+        obj (Any): The object to make serializable.
+
+    Returns:
+        Any: The JSON-serializable version of the object.
     """
 
     if isinstance(obj, Path):
@@ -266,10 +272,10 @@ def dict_to_str(d: dict) -> str:
     Converts a dictionary to a string for display.
 
     Args:
-        d (dict): dictionary which will be converted to string.
+        d (dict): Dictionary which will be converted to string.
 
     Returns:
-        stringified version of the dictionary.
+        str: Stringified version of the dictionary.
     """
 
     return ", ".join([f"{k}: {v}" for k, v in d.items()])
@@ -599,6 +605,9 @@ class nnUNetAPI:
     """
 
     def __post_init__(self):
+        """
+        Initializes the nnUNetAPI instance, checking for GPU and setting up the DB.
+        """
         if torch.cuda.is_available() is False:
             raise ValueError("No GPU available")
         self.model_dictionary, self.alias_dict = get_model_dictionary()
@@ -609,8 +618,13 @@ class nnUNetAPI:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Create the zip_store table if it does not exist.
-        Schema: job_id TEXT PRIMARY KEY, created_at DATE, zip_path TEXT
+        """
+        Creates the zip_store table if it does not exist.
+
+        Schema:
+            job_id (TEXT): Primary key.
+            created_at (DATE): ISO date of creation.
+            zip_path (TEXT): Path to the generated zip file.
         """
         cur = self._db_conn.cursor()
         cur.execute(
@@ -625,8 +639,11 @@ class nnUNetAPI:
         self._db_conn.commit()
 
     def _store_zip(self, job_id: str, zip_path: Path) -> None:
-        """Insert a new record for a generated zip file.
-        ``created_at`` is stored as ISO date (YYYY‑MM‑DD).
+        """Inserts or replaces a record for a generated zip file.
+
+        Args:
+            job_id (str): Unique job identifier.
+            zip_path (Path): Path to the generated zip file.
         """
         cur = self._db_conn.cursor()
         cur.execute(
@@ -636,7 +653,15 @@ class nnUNetAPI:
         self._db_conn.commit()
 
     def _get_zip_path(self, job_id: str) -> Path | None:
-        """Retrieve the zip path for ``job_id`` or ``None`` if not found."""
+        """
+        Retrieves the zip path for a given job_id.
+
+        Args:
+            job_id (str): Unique job identifier.
+
+        Returns:
+            Path | None: The path to the zip file if found, else None.
+        """
         cur = self._db_conn.cursor()
         cur.execute(
             "SELECT zip_path FROM zip_store WHERE job_id = ?", (job_id,)
