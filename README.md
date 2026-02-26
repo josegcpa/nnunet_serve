@@ -4,7 +4,20 @@
 
 ## Context
 
-Given that [nnUNet](https://github.com/MIC-DKFZ/nnUNet) is a relatively flexible framework, we have developed a container that allows users to run nnUNet in a container while varying the necessary models. The main features are inferring all necessary parameters from the nnUNet files (spacing, extensions) and working for both DICOM folder and SITK-readable files. If the input is a DICOM, the segmentation is converted into a DICOM-seg file, compatible with PACS systems.
+[nnUNet](https://github.com/MIC-DKFZ/nnUNet) is a relatively flexible framework. However, it is not exactly what people would call "production ready". With `nnunet_serve`, we have developed a container that allows users to run nnUNet as an API or as a CLI tool while keeping a relatively stable pool of models.
+
+## Main features
+
+1. Single case inference from and to multiple formats (from: Nifti, DICOM; to: Nifti, DICOM-seg, RT-struct, fractional DICOM-seg)
+2. Batch inference using the aforementioned options (with background file writing to accelerate processing)
+3. Model cascading: multiple models can be concatenated with being stuck to strict folder structures
+    * Example 1: segment prostate → crop to prostate → detect prostate cancer
+    * Example 2: segment prostate zones → crop to prostate zones → use prostate zones as input → segment csPCa
+    * Example 3: segment liver → crop to liver → segment HCC → exclude HCC with 0% overlap with liver
+4. Integration with Orthanc: Orthanc is the most open-source DICOM-web server, making nnunet_serve a very reasonable and appealing infrastructure for research
+5. TotalSegmentator integration: TotalSegmentator is the largest suite of nnU-Net models for multiple CT and MRI tasks. We improve on their framework and greatly reduce inference times through refactoring and keeping series/inferences in memory
+6. API: unlike typical workflows for nnU-Net, which depend on CLI-based routines, we have developed an API which guarantees integration with web-based services
+7. Integration with both [SNOMED-CT](https://www.nlm.nih.gov/healthit/snomedct/index.html) and [EUCAIM](https://hyperontology.eucaim.cancerimage.eu/) ontologies: ontology integration allows the simple specification of DICOM-seg/RTstruct metadata, lifting the burden of generating custom files for specific structures
 
 ## Installation
 
@@ -34,7 +47,22 @@ Model configuration makes use of `model-serve-spec.yaml`. This is a relatively s
   - **`default_args`**: defaults for request parameters (e.g., `series_folders`, `use_folds`, `proba_threshold`, `min_confidence`, `tta`, `save_proba_map`, `checkpoint_name`, etc.). When multiple models are requested, list-valued defaults are merged per model (see `get_default_params()` in `nnunet_serve_utils.py`).
   - For TotalSegmentator tasks, you can specify `totalseg_task` (e.g., `total_fastest`); weights are auto-downloaded and `metadata` is auto-derived.
 
+### Environment variables
 
+* `NNUNET_OUTPUT_DIR`: path used to store temporary files. Defaults to "/tmp/nnunet".
+* `LOGS_DIR`: path used to store logs. Defaults to "./logs".
+* `PORT`: port used by the API. Defaults to "12345".
+* `MAX_REQUESTS_PER_MINUTE`: maximum number of requests per minute. Defaults to "10".
+* `ORTHANC_URL`: URL of the Orthanc server. Defaults to `http://localhost:8042`.
+* `ORTHANC_USER`: username used to authenticate with Orthanc. Defaults to `None`.
+* `ORTHANC_PASSWORD`: password used to authenticate with Orthanc. Defaults to `None`.
+* `TMP_STUDY_DIR`: path used to store temporary study files (if downloads or similar are necessary). Defaults to `/tmp/nnunet_serve/orthanc`.
+* `DEFAULT_SEGMENT_SCHEME`: default segment scheme used for DICOM-SEG/RTStruct export. Defaults to `SCT` (SNOMED-CT).
+* `NNUNET_SERVE_LOGGING_LEVEL`: logging level used by the API. Defaults to `INFO`.
+* `TOTALSEG_WEIGHTS_PATH`: path to the TotalSegmentator weights directory. Defaults to `<model-serve-spec.yaml["model_folder"]>/totalseg`.
+* `MODEL_SERVE_SPEC`: path to the model serve specification file. Defaults to `model-serve-spec.yaml`.
+* `DEBUG`: whether to run the API in debug mode (avoids using try/except blocks and produces errors which are easier to trace). Defaults to `False`.
+ 
 ### Standalone script
 
 A considerable objective of this framework was its deployment as a standalone tool (for `bash`). To use it:
