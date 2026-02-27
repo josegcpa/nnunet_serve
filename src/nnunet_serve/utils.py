@@ -423,7 +423,10 @@ def read_dicom_as_sitk(
             dicom_file_dict, bvalue_for_filtering, exact=False
         )
     for dcm_file, f in dicom_file_dict.items():
-        acquisition_number = f[0x0020, 0x0012].value
+        acquisition_number = f.get((0x0020, 0x0012), None)
+        if acquisition_number is None:
+            acquisition_number = ""
+        acquisition_number = acquisition_number.value
         if acquisition_number not in good_file_paths:
             good_file_paths[acquisition_number] = []
         good_file_paths[acquisition_number].append(dcm_file)
