@@ -40,6 +40,13 @@ def int_or_list_of_ints(x: str) -> int | list[int]:
     return int(x)
 
 
+def int_or_float(x: str) -> int | float:
+    try:
+        return int(x)
+    except ValueError:
+        return float(x)
+
+
 def list_of_str(x: str) -> list[str]:
     return x.split(",")
 
@@ -426,7 +433,8 @@ def read_dicom_as_sitk(
         acquisition_number = f.get((0x0020, 0x0012), None)
         if acquisition_number is None:
             acquisition_number = ""
-        acquisition_number = acquisition_number.value
+        else:
+            acquisition_number = acquisition_number.value
         if acquisition_number not in good_file_paths:
             good_file_paths[acquisition_number] = []
         good_file_paths[acquisition_number].append(dcm_file)
@@ -891,7 +899,7 @@ def make_parser(
             {
                 "help": "Padding to be added to the cropped region.",
                 "default": (10, 10, 10),
-                "type": int | float,
+                "type": int_or_float,
                 "nargs": "+",
             },
         ),
