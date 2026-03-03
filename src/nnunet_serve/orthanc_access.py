@@ -1,5 +1,6 @@
 import requests
 import os
+import pydicom
 from typing import Any
 from io import BytesIO
 from requests.auth import HTTPBasicAuth
@@ -177,13 +178,32 @@ def upload_instance(instance_path: str):
     Args:
         instance_path (str): The path to the instance.
     """
+    f = pydicom.dcmread(instance_path, stop_before_pixels=True)
+    series_uid = f.SeriesInstanceUID
+    find_data = {
+        "Level": "Instance",
+        "Query": {
+            "SeriesInstanceUID": series_uid,
+        },
+    }
+
+    with open(instance_path, "rb") as f:
+        dicom_bytes = f.read()
+    headers = {
+        "Accept": "application/json",
+    }
     response = requests.post(
         f"{ORTHANC_URL}/instances",
         auth=AUTH,
-        files={"file": open(instance_path, "rb")},
+        files={"file": ("instance.dcm", dicom_bytes, "application/dicom")},
+        headers=headers,
     )
     response.raise_for_status()
-    return response.text
+
+    result = requests.post(
+        f"{ORTHANC_URL}/tools/find", json=find_data, auth=AUTH
+    ).json()[0]
+    return result
 
 
 @fail_if_orthanc_not_available
