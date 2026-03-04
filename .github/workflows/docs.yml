@@ -20,7 +20,6 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: 3.13
-      - run: uv install zensical
       - run: uv sync --only-dev
       - run: uv run zensical build --clean
       - uses: actions/upload-pages-artifact@v4
