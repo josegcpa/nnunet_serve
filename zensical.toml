@@ -7,8 +7,8 @@ site_author = "José Guilherme de Almeida"
 copyright = """
 Copyright &copy; 2026 José Guilherme de Almeida
 """
-docs_dir = "docs_zensical"
-site_dir = "docs"
+docs_dir = "docs"
+site_dir = "site"
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = [
