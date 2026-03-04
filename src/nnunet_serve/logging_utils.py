@@ -16,7 +16,7 @@ formatter = logging.Formatter(
 MANAGER = logging.Manager(logging.getLogger())
 
 
-def get_logger(log_name: str):
+def get_logger(log_name: str) -> logging.Logger:
     """
     Returns a logger that logs to console. Features the following:
         - Console stream handler (already present)

@@ -1,5 +1,14 @@
 """
-pydicom_seg [1] dependencies are conflicting with recent pydantic versions
+Helpers for constructing DICOM SEG objects without importing pydicom-seg.
+
+This module vendors and adapts pieces of the `pydicom_seg` project [1] so we
+can generate DICOM segmentation objects while avoiding dependency conflicts
+with recent `pydantic` versions. Keeping this logic local lets the rest of the
+service depend on a stable API even if the original library changes.
+
+**Why don't you use pydicom_seg [1] directly?**
+
+pydicom_seg dependencies are conflicting with recent pydantic versions
 so we have to have them here to avoid conflicts.
 
 [1] https://github.com/razorx89/pydicom-seg

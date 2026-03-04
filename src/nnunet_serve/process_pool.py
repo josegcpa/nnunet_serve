@@ -1,3 +1,12 @@
+"""
+Lightweight multiprocessing pool used for nnU-Net serving.
+
+This module defines a simple process pool abstraction that runs a user-
+defined function in multiple worker processes. It is primarily used to
+offload expensive or blocking work, such as writing segmentation
+results, without tying up the main application process.
+"""
+
 from multiprocessing import Process, Queue
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import export_predictions

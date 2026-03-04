@@ -1,3 +1,7 @@
+"""
+File utilities for nnunet-serve.
+"""
+
 import os
 import shutil
 import tarfile

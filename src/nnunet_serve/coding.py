@@ -1,5 +1,8 @@
 """
 Maps type or modifier concepts to SNOMED CT category codes.
+
+This module provides mappings between various medical imaging concepts
+and their corresponding SNOMED CT codes.
 """
 
 from highdicom.sr.coding import CodedConcept

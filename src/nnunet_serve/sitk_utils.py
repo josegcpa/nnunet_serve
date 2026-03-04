@@ -1,3 +1,11 @@
+"""
+SimpleITK-based image utilities used during preprocessing and postprocessing.
+
+The functions in this module handle common 3D medical image operations such as
+resampling images to a target geometry, changing spacing, and applying
+connected-component and morphology operations to masks.
+"""
+
 import numpy as np
 import SimpleITK as sitk
 from scipy import ndimage

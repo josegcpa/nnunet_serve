@@ -1,5 +1,10 @@
 """
-Utilities for writing segmentations.
+Utilities for exporting nnU-Net segmentations to disk and DICOM SEG.
+
+This module provides the `SegWriter` abstraction and supporting helpers to
+convert raw prediction arrays into persistent representations, including
+NIfTI-like formats and DICOM SEG objects with appropriate coding, colors,
+and metadata derived from the input images and model configuration.
 """
 
 import logging
@@ -104,7 +109,7 @@ def get_segment_type_code(segment: dict | str, i: int) -> Code:
             ``pydicom.sr._concepts_dict.CONCEPTS``, after being preprocessed
             to remove laterality-based indicators (e.g., "Right", "Left"; these
             are nonetheless included in the ``segment_dict["label"]``).
-        - i (int): 1-based segment number.
+        i (int): 1-based segment number.
 
     Returns:
         - Code: A ``pydicom.sr.codedict.Code`` representing the segment's

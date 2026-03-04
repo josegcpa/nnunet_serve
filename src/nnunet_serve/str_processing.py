@@ -1,3 +1,7 @@
+"""
+Small helpers for normalizing strings used in segment and label names.
+"""
+
 from copy import deepcopy
 
 

@@ -1,3 +1,14 @@
+"""
+Utilities for interacting with an Orthanc DICOM server.
+
+This module wraps common HTTP operations against an Orthanc instance,
+including listing patients, studies, and series, as well as downloading
+and extracting series data to a temporary directory. It centralizes
+authentication, availability checks, and basic error handling so other
+parts of the service can work with simple Python functions instead of
+raw REST calls.
+"""
+
 import requests
 import os
 import pydicom

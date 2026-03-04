@@ -1,5 +1,13 @@
 """
-Utilities for nnU-Net model serving.
+Utilities for nnU-Net model serving. The core functions handling the prediction
+workflows are:
+
+1. [single_model_inference][nnunet_serve.nnunet_api_utils.single_model_inference] - runs the inference
+for a single model.
+2. [multi_model_inference][nnunet_serve.nnunet_api_utils.multi_model_inference] - runs the inference
+using multiple models (i.e. a model _cascade_).
+3. [predict][nnunet_serve.nnunet_api_utils.predict] - wrapper around
+[multi_model_inference][nnunet_serve.nnunet_api_utils.multi_model_inference] which also handles file saving.
 """
 
 import json
@@ -936,7 +944,7 @@ def process_proba_array(
     Applies a candidate extraction protocol (threshold, CC analysis, min_confidence).
 
     Args:
-        array (np.ndarray): an array corresponding to a probability map.
+        proba_array (np.ndarray): an array corresponding to a probability map.
         proba_threshold (float, optional): sets values below this value to 0.
         min_confidence (float, optional): removes objects whose maximum
             probability is lower than this value.
@@ -1070,7 +1078,7 @@ def single_model_inference(
 
     Args:
         nnunet_path (str): path to nnUNet model.
-        series (list[str]): series volumes or paths to series.
+        volumes (list[sitk.Image]): series volumes.
         class_idx (int | list[int], optional): class index for probability
             output. Defaults to 1.
         checkpoint_name (str, optional): name of checkpoint in nnUNet model.
@@ -1098,8 +1106,6 @@ def single_model_inference(
             added to the cropped region. Defaults to None.
         min_intersection (float, optional): fraction of prediction which should
             intersect with ``intersect_with``. Defaults to 0.1.
-        prediction_name (str | None, optional): name of the prediction. Defaults
-            to None.
         remove_objects_smaller_than (float | None, optional): whether to remove
             objects smaller than this threshold. If a float is provided, it is
             considered as a percentage of the maximum object size. Defaults to None.

@@ -1,3 +1,10 @@
+"""
+Data models for the nnUNet serve API.
+
+This module defines Pydantic models for inference requests and responses,
+including support for local data, Orthanc, and file-based inputs.
+"""
+
 from enum import Enum
 from typing import Any
 
@@ -5,11 +12,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CascadeMode(Enum):
+    """
+    Options for cascade mode.
+    """
+
     INTERSECT = "intersect"
     CROP = "crop"
 
 
 class CheckpointName(Enum):
+    """
+    Options for checkpoint name. Options are ``checkpoint_final.pth`` and ``checkpoint_best.pth``.
+    """
+
     FINAL = "checkpoint_final.pth"
     BEST = "checkpoint_best.pth"
 
@@ -128,6 +143,10 @@ class InferenceRequestBase(BaseModel):
 
 
 class InferenceRequest(InferenceRequestBase):
+    """
+    Data model for the inference request from local data.
+    """
+
     study_path: str = Field(
         description="Path to study folder or list of paths to studies."
     )
@@ -147,6 +166,10 @@ class InferenceRequest(InferenceRequestBase):
 
 
 class InferenceRequestOrthanc(InferenceRequestBase):
+    """
+    Data model for the inference request from Orthanc.
+    """
+
     series_ids: list[str] | list[list[str]] = Field(
         description="Series IDs or list of series IDs (relative to study_path).",
         default=None,
@@ -163,6 +186,10 @@ class InferenceRequestOrthanc(InferenceRequestBase):
 
 
 class InferenceRequestFile(InferenceRequestBase):
+    """
+    Data model for the inference request from files over a network.
+    """
+
     study_path: str | None = Field(
         description="Path to study folder or list of paths to studies.",
         default=None,
@@ -174,6 +201,10 @@ class InferenceRequestFile(InferenceRequestBase):
 
 
 class InferenceResponse(BaseModel):
+    """
+    Data model for the inference response.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     time_elapsed: float | None
@@ -186,6 +217,10 @@ class InferenceResponse(BaseModel):
 
 
 class InferenceFileResponse(InferenceResponse):
+    """
+    Data model for the inference response from files (when using [InferenceRequestFile](nnunet_serve.api_datamodels.InferenceRequestFile)).
+    """
+
     job_id: str
 
 

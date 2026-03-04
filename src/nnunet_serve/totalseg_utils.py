@@ -1,3 +1,13 @@
+"""
+Helpers and mappings for integrating TotalSegmentator tasks.
+
+This module defines mappings between human-readable TotalSegmentator task
+names and their internal numeric IDs, as well as reverse lookups and
+additional SNOMED CT concepts. It also exposes utilities to load extended
+SNOMED mappings used when exporting nnU-Net predictions in a
+TotalSegmentator-compatible way.
+"""
+
 from totalsegmentator.dicom_utils import load_snomed_mapping
 
 TASK_CONVERSION = {

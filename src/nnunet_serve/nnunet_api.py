@@ -1,3 +1,15 @@
+"""FastAPI application for nnU-Net model serving.
+
+This module defines the HTTP API surface for nnU-Net inference and related
+operations, including:
+
+1. Health and readiness endpoints for liveness and configuration checks.
+2. Inference endpoints accepting uploaded data or Orthanc references and
+   delegating prediction to [nnunet_serve.nnunet_api_utils][].
+3. Utility endpoints for retrieving model metadata, JSON schemas, cached
+   results, and housekeeping tasks such as cache expiration.
+"""
+
 import datetime
 import importlib
 import json
@@ -424,7 +436,7 @@ def resolve_models(
     return nnunet_path, metadata, default_args, is_totalseg, min_mem, None
 
 
-def get_may_inject(default_args: list[dict]):
+def get_may_inject(default_args: list[dict]) -> list[dict] | str:
     """
     Determines whether there are injectable series. These are exclusively the
     series which are to be obtained from an inference (i.e. starting with a `from:`).
@@ -591,18 +603,19 @@ def build_infer_success_payload(
 
 @dataclass
 class nnUNetAPI:
-    app: fastapi.FastAPI | None = None
-    writing_process_pool: ProcessPool | None = None
     """
     General nnU-Net API.
-    
-    **Important:** the ``writing_process_pool`` is only implemented for the 
+
+    The ``writing_process_pool`` is only implemented for the
     command line entrypoints and, as such, is only used when ``app`` is None.
-    
+
     Args:
         app: FastAPI application
         writing_process_pool: ProcessPool for writing files.
     """
+
+    app: fastapi.FastAPI | None = None
+    writing_process_pool: ProcessPool | None = None
 
     def __post_init__(self):
         """

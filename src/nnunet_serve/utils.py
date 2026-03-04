@@ -1,5 +1,11 @@
 """
-General utilities.
+General utilities for nnU-Net serving and command-line workflows.
+
+This module collects small, reusable helpers for argument parsing, DICOM and
+image I/O, metadata handling, simple type conversions, and GPU/wall-clock
+utility functions. They are shared across the FastAPI service and CLI entry
+points to keep higher-level code focused on orchestration rather than low-
+level plumbing.
 """
 
 import os
@@ -26,12 +32,38 @@ RESCALE_SLOPE_TAG = (0x0028, 0x1053)
 
 
 def float_or_none(x: str) -> float | None:
+    """
+    Converts a string to float if it is different from "none"; if that is the
+    case, the function returns None.
+
+    Args:
+        x (str): string to be converted.
+
+    Returns:
+        float | None: None or the converted float.
+    """
     if x.lower() == "none":
         return None
     return float(x)
 
 
 def int_or_list_of_ints(x: str) -> int | list[int]:
+    """
+    Converts a comma-separated string of integers into an int or list.
+
+    The input string is first stripped of spaces and trailing commas. If the
+    value is "all" (case-insensitive), the function returns ``None``. If the
+    string contains commas, it is split into a list of unique integers.
+    Otherwise, it is converted to a single integer.
+
+    Args:
+        x (str): String encoding an integer, a comma-separated list of
+            integers, or the special value ``"all"``.
+
+    Returns:
+        int | list[int] | None: ``None`` for ``"all"``, a single integer, or a
+        list of unique integers.
+    """
     x = x.replace(" ", "").strip(",")
     if x.lower() == "all":
         return None
@@ -41,6 +73,16 @@ def int_or_list_of_ints(x: str) -> int | list[int]:
 
 
 def int_or_float(x: str) -> int | float:
+    """
+    Parses a string into an integer when possible, otherwise a float.
+
+    Args:
+        x (str): String representation of a numeric value.
+
+    Returns:
+        int | float: The parsed integer if conversion to ``int`` succeeds,
+        otherwise the parsed ``float``.
+    """
     try:
         return int(x)
     except ValueError:
@@ -48,6 +90,14 @@ def int_or_float(x: str) -> int | float:
 
 
 def list_of_str(x: str) -> list[str]:
+    """Splits a comma-separated string into a list of strings.
+
+    Args:
+        x (str): Comma-separated string.
+
+    Returns:
+        list[str]: List of substrings obtained by splitting on commas.
+    """
     return x.split(",")
 
 
@@ -452,6 +502,26 @@ def read_dicom_as_sitk(
 
 
 def read_dicom_seg_as_volume(path: str) -> sitk.Image:
+    """
+    Reads a DICOM SEG object from disk and returns it as a volume image.
+
+    The function accepts either a directory containing a single DICOM SEG
+    file or a direct path to a DICOM file. It validates that the input file
+    has the expected SEG SOP Class UID and then uses ``MultiClassReader`` to
+    convert it into a ``SimpleITK.Image`` volume.
+
+    Args:
+        path (str): Path to a DICOM SEG file or a directory containing exactly
+            one such file.
+
+    Raises:
+        ValueError: If the provided directory contains more than one file.
+        AssertionError: If the DICOM file does not have the SEG SOP Class UID
+            ``1.2.840.10008.5.1.4.1.1.66.4``.
+
+    Returns:
+        sitk.Image: The decoded segmentation volume.
+    """
     if os.path.isdir(path):
         path = glob(os.path.join(path, "*"))
         if len(path) > 1:
