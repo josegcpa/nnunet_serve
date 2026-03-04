@@ -238,10 +238,11 @@ class SeriesLoader:
 
         Returns:
             A tuple `(volume, good_file_paths)` where:
-            - `volume` is the loaded SimpleITK image, potentially post-processed.
-            - `good_file_paths` is only populated for DICOM inputs and corresponds to
-              the list of files considered valid by `read_dicom_as_sitk`.
+                - `volume` is the loaded SimpleITK image, potentially post-processed.
+                - `good_file_paths` is only populated for DICOM inputs and corresponds to
+                the list of files considered valid by `read_dicom_as_sitk`.
         """
+
         path, equal, index = self.get_info(path)
         if path not in self.loaded_volumes:
             if self.is_dicom:
