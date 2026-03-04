@@ -49,3 +49,11 @@ nnunet-validate-metadata = "nnunet_serve.entrypoints.validate_metadata:main"
 markers = [
     "integration: marks tests as integration tests",
 ]
+
+[dependency-groups]
+dev = [
+    "griffe>=2.0.0",
+    "griffe-pydantic>=1.3.1",
+    "mkdocstrings-python>=2.0.3",
+    "zensical>=0.0.24",
+]
