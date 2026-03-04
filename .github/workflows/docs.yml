@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: 3.13
       - run: uv sync --only-dev
-      - run: uv run zensical build --clean
+      - run: uv run --only-dev zensical build --clean
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs
