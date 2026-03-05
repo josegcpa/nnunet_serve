@@ -1,4 +1,4 @@
-# Configure models: `model-serve-spec.yaml`
+# Configuring models
 
 Model configuration makes use of `model-serve-spec.yaml`. This is a relatively simple YAML file where each model is defined, together with potential aliases and the relevant paths.
 

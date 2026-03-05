@@ -10,11 +10,13 @@ Copyright &copy; 2026 José Guilherme de Almeida
 docs_dir = "docs"
 site_dir = "site"
 
+
 [project.plugins.mkdocstrings.handlers.python]
 inventories = [
     "https://docs.python.org/3/objects.inv",
     "https://docs.pydantic.dev/latest/objects.inv"]
 paths = ["src"]
+
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"
