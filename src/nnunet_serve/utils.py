@@ -171,7 +171,7 @@ def filter_by_bvalue(
 
     Args:
         dicom_files (list): list of pydicom file objects.
-        target_bvalues (int): the expected b-value.
+        target_bvalue (int): the expected b-value.
         exact (bool, optional): whether the b-value matching is to be exact
             (raises error if exact target_bvalue is not available) or
             approximate returns the b-value which is closest to target_bvalue.
@@ -179,6 +179,7 @@ def filter_by_bvalue(
     Returns:
         list: list of b-value-filtered pydicom file objects.
     """
+
     BVALUE_TAG = ("0018", "9087")
     SIEMENS_BVALUE_TAG = ("0019", "100c")
     GE_BVALUE_TAG = ("0043", "1039")
@@ -235,7 +236,7 @@ def filter_by_bvalue_from_dict(
 
     Args:
         dicom_files (list): list of pydicom file objects.
-        target_bvalues (int): the expected b-value.
+        target_bvalue (int): the expected b-value.
         exact (bool, optional): whether the b-value matching is to be exact
             (raises error if exact target_bvalue is not available) or
             approximate returns the b-value which is closest to target_bvalue.
@@ -565,7 +566,6 @@ def export_to_dicom_seg_dcmqi(
     Exports a SITK image mask as a DICOM segmentation object with dcmqi.
 
     Args:
-        mask (sitk.Image): an SITK file object corresponding to a mask.
         mask_path (str): path to (S)ITK mask.
         metadata_path (str): path to metadata template file.
         file_paths (Sequence[str]): list of DICOM file paths corresponding to the
@@ -578,6 +578,7 @@ def export_to_dicom_seg_dcmqi(
         str: "success" if the process was successful, "empty mask" if the SITK
             mask contained no values.
     """
+
     import subprocess
 
     output_dcm_path = f"{output_dir}/{output_file_name}.dcm"
