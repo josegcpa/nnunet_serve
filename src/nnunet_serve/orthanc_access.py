@@ -192,7 +192,7 @@ def upload_instance(instance_path: str):
     f = pydicom.dcmread(instance_path, stop_before_pixels=True)
     series_uid = f.SeriesInstanceUID
     find_data = {
-        "Level": "Instance",
+        "Level": "Series",
         "Query": {
             "SeriesInstanceUID": series_uid,
         },
