@@ -576,14 +576,14 @@ class SegWriter:
                 meaning = ss.CodeMeaning
             else:
                 meaning = ss.meaning
-            label_meanings.append(meaning)
+            label_meanings.append(meaning.lower().replace(" structure of", ""))
         seg_series_description = "Seg of " + ", ".join(label_meanings)
         if len(seg_series_description) > 64:
             seg_series_description = seg_series_description[:61] + "..."
         if is_fractional_compliant:
             if len(segment_descriptions) > 1:
                 logger.warning(
-                    "Skipping saving the fractional compliant because len(segment_descriptions) > 1"
+                    "Skipping saving the fractional compliant mask because len(segment_descriptions) > 1"
                 )
                 return "skipped"
             seg_type = hd.seg.SegmentationTypeValues.BINARY
