@@ -501,8 +501,10 @@ def apply_request_defaults(
             if is_index is True:
                 pt = params["proba_threshold"][idx]
                 if pt is None or pt == [None]:
-                    logger.info(f"Setting proba_threshold for {ins[1]} to {v}")
-                    params["proba_threshold"][idx] = -1e-6  # incudes everything
+                    logger.info(
+                        f"Setting proba_threshold for {ins[1]} to -1e-6"
+                    )
+                    params["proba_threshold"][idx] = -1e-6
 
 
 def run_predict_inference(
