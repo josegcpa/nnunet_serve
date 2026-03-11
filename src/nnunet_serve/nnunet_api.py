@@ -497,12 +497,12 @@ def apply_request_defaults(
                 params[k][ins[0]] = v
     if insert_at:
         logger.info("Setting proba_threshold to 0.0 if necessary")
-        for idx, _, _, is_index in insert_at:
+        for idx, model_id, _, is_index in insert_at:
             if is_index is True:
                 pt = params["proba_threshold"][idx]
                 if pt is None or pt == [None]:
                     logger.info(
-                        f"Setting proba_threshold for {ins[1]} to -1e-6"
+                        f"Setting proba_threshold for {model_id} to -1e-6"
                     )
                     params["proba_threshold"][idx] = -1e-6
 
