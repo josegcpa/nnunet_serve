@@ -1173,6 +1173,7 @@ def single_model_inference(
     volumes = [resample_image(volume, spacing) for volume in volumes]
     logger.info("Running inference using %s", nnunet_path)
     logger.info("Folds: %s", use_folds)
+    logger.info("Mirroring: %s", mirroring)
     input_array = np.stack([sitk.GetArrayFromImage(v) for v in volumes])
     image_properties = {
         "spacing": volumes[0].GetSpacing()[::-1],
@@ -1394,6 +1395,7 @@ def multi_model_inference(
             class_idx_list = [class_idx for _ in nnunet_path]
         elif isinstance(class_idx, (tuple, list)):
             class_idx_list = class_idx
+        mirroring = coherce_to_list(mirroring, len(nnunet_path))
         proba_threshold = coherce_to_list(proba_threshold, len(nnunet_path))
         min_confidence = coherce_to_list(min_confidence, len(nnunet_path))
         remove_objects_smaller_than = coherce_to_list(
@@ -1429,7 +1431,7 @@ def multi_model_inference(
                 volumes=series_loader.get_volumes(i),
                 class_idx=class_idx_list[i],
                 checkpoint_name=checkpoint_name_list[i],
-                mirroring=mirroring,
+                mirroring=mirroring[0],
                 device_id=device_id,
                 use_folds=use_folds[i],
                 proba_threshold=proba_threshold[i],
