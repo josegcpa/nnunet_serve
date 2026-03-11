@@ -156,7 +156,7 @@ A core concept underlies this framework - that of cascading predictions. The out
 - **`--series_folders` / `-s` advanced (`from:` syntax)**: In cascades, you can reference a prior stage prediction as an input channel using `from:<model_or_alias>`. Optional selectors are supported:
   - `from:<model_or_alias>` → full predicted mask (`prediction.nii.gz`)
   - `from:<model_or_alias>=<label>` → binary mask for one label (for example `=1`)
-  - `from:<model_or_alias>[<index>]` → indexed volume/channel access
+  - `from:<model_or_alias>[<index>]` → indexed volume/channel access **for probabilities**
   This allows "late" models to consume outputs from earlier models without manually creating intermediate files.
 - **`--nnunet_id`**: Identifier(s) of the nnU‑Net model(s) to run. Provide one or more model names; they will be applied sequentially 💧
 - **`--checkpoint_name`**: Name(s) of the checkpoint file(s) to load (default: `checkpoint_final.pth`) 💧
