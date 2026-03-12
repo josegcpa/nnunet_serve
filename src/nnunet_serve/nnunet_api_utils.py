@@ -275,14 +275,21 @@ class SeriesLoader:
         self.loaded_volumes[key] = value
         self.good_file_paths[key] = None
 
-    def register(self, image: sitk.Image, stage: int):
+    def register(
+        self,
+        image: sitk.Image,
+        stage: int,
+        image_file_name: str = "prediction.nii.gz",
+    ):
         """Registers an image for a specific stage.
 
         Args:
             image (sitk.Image): The image to register.
             stage (int): The stage index to associate the image with.
+            image_file_name (str, optional): image file name presumed to be inside
+                the stage directory. Defaults to "prediction.nii.gz".
         """
-        key = os.path.join(f"stage_{stage}", "prediction.nii.gz")
+        key = os.path.join(f"stage_{stage}", image_file_name)
         self[key] = image
 
     def get_info(self, path: str) -> tuple[str, int | None, int | None]:
@@ -333,7 +340,9 @@ class SeriesLoader:
         if equal is not None:
             return volume == equal
         elif index is not None:
-            return volume[index]
+            select_f = sitk.VectorIndexSelectionCastImageFilter()
+            select_f.SetIndex(index)
+            return select_f.Execute(volume)
         return sitk.Cast(volume, sitk.sitkFloat32)
 
     def get_volumes(self, stage: int) -> list[sitk.Image]:
@@ -1164,6 +1173,7 @@ def single_model_inference(
     volumes = [resample_image(volume, spacing) for volume in volumes]
     logger.info("Running inference using %s", nnunet_path)
     logger.info("Folds: %s", use_folds)
+    logger.info("Mirroring: %s", mirroring)
     input_array = np.stack([sitk.GetArrayFromImage(v) for v in volumes])
     image_properties = {
         "spacing": volumes[0].GetSpacing()[::-1],
@@ -1198,7 +1208,6 @@ def single_model_inference(
         mask_array = small_object_removal(
             mask_array, remove_objects_smaller_than
         )
-    proba_array = proba_array * (mask_array[None] > 0.5)
 
     logger.info("nnUNet: inference done")
 
@@ -1217,7 +1226,7 @@ def single_model_inference(
                 bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]
             ]
         intersect_with = resample_image(intersect_with, spacing, is_mask=True)
-    if proba_threshold:
+    if proba_threshold is not None:
         mask, probability_map, _ = process_proba_array(
             proba_array,
             volumes[0],
@@ -1386,6 +1395,7 @@ def multi_model_inference(
             class_idx_list = [class_idx for _ in nnunet_path]
         elif isinstance(class_idx, (tuple, list)):
             class_idx_list = class_idx
+        mirroring = coherce_to_list(mirroring, len(nnunet_path))
         proba_threshold = coherce_to_list(proba_threshold, len(nnunet_path))
         min_confidence = coherce_to_list(min_confidence, len(nnunet_path))
         remove_objects_smaller_than = coherce_to_list(
@@ -1421,7 +1431,7 @@ def multi_model_inference(
                 volumes=series_loader.get_volumes(i),
                 class_idx=class_idx_list[i],
                 checkpoint_name=checkpoint_name_list[i],
-                mirroring=mirroring,
+                mirroring=mirroring[0],
                 device_id=device_id,
                 use_folds=use_folds[i],
                 proba_threshold=proba_threshold[i],
@@ -1439,6 +1449,10 @@ def multi_model_inference(
             all_predictions.append(mask)
             all_proba_maps.append(proba_map)
             series_loader.register(mask, i)
+            if proba_map:
+                series_loader.register(
+                    proba_map, i, image_file_name="probabilities.nii.gz"
+                )
             if i < (len(nnunet_path) - 1):
                 if "intersect" in cascade_mode:
                     logger.info("Using mask for intersection")

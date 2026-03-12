@@ -316,7 +316,7 @@ def expand_cascade_inputs(
     model_dictionary: dict,
     alias_dict: dict,
     may_inject_series: list[dict] | None = None,
-) -> tuple[list[str], list[tuple[int, str]]]:
+) -> tuple[list[str], list[tuple[int, str, bool, bool]]]:
     """Expand ``from:<model>`` references into explicit cascade stages.
 
     This function mutates ``params`` and ``nnunet_id`` in place to inject missing
@@ -354,21 +354,22 @@ def expand_cascade_inputs(
                 prev_stage_sid = sid.split(":")[1]
                 is_equal = "=" in prev_stage_sid
                 is_index = "[" in prev_stage_sid
+                pred_name = "prediction.nii.gz"
                 if is_equal:
                     prev_stage_nnunet_id, pred_id = prev_stage_sid.split("=")
                 elif is_index:
                     prev_stage_nnunet_id, pred_id = prev_stage_sid.split("[")
                     pred_id = pred_id.replace("]", "")
+                    pred_name = "probabilities.nii.gz"
                 else:
                     prev_stage_nnunet_id, pred_id = prev_stage_sid, None
 
-                pred_name = "prediction.nii.gz"
                 if is_equal:
-                    pred_name = f"prediction.nii.gz={pred_id}"
+                    pred_name = f"{pred_name}={pred_id}"
                 if is_index:
-                    pred_name = f"prediction.nii.gz[{pred_id}]"
+                    pred_name = f"{pred_name}[{pred_id}]"
                 if prev_stage_nnunet_id not in nnunet_id[:idx]:
-                    ins = (idx, prev_stage_nnunet_id)
+                    ins = (idx, prev_stage_nnunet_id, is_equal, is_index)
                     if ins not in insert_at:
                         channels = model_dictionary[
                             alias_dict[prev_stage_nnunet_id]
@@ -385,7 +386,7 @@ def expand_cascade_inputs(
                     )
 
     for i in range(len(insert_at)):
-        idx, prev_stage_nnunet_id = insert_at[i]
+        idx, prev_stage_nnunet_id, _, _ = insert_at[i]
         nnunet_id.insert(idx, prev_stage_nnunet_id)
         params["series_folders"].insert(idx, new_inputs[i])
         for k in CASCADE_ARGUMENTS:
@@ -466,7 +467,7 @@ def apply_request_defaults(
     params: dict,
     default_args: list[dict],
     inference_request: InferenceRequest,
-    insert_at: list[tuple[int, str]],
+    insert_at: list[tuple[int, str, bool, bool]],
 ) -> None:
     """
     Apply model-level default args to normalized request params.
@@ -476,7 +477,7 @@ def apply_request_defaults(
         default_args (list[dict]): Default argument dictionaries from model specs.
         inference_request (InferenceRequest): Original request model used to detect
             explicitly set fields.
-        insert_at (list[tuple[int, str]]): Cascade insertion metadata from
+        insert_at (list[tuple[int, str, bool, bool]]): Cascade insertion metadata from
             ``expand_cascade_inputs``.
     """
     default_params = get_default_params(default_args)
@@ -494,6 +495,16 @@ def apply_request_defaults(
                 if k in default_params:
                     v = default_params[k][ins[0]]
                 params[k][ins[0]] = v
+    if insert_at:
+        logger.info("Setting proba_threshold to 0.0 if necessary")
+        for idx, model_id, _, is_index in insert_at:
+            if is_index is True:
+                pt = params["proba_threshold"][idx]
+                if pt is None or pt == [None]:
+                    logger.info(
+                        f"Setting proba_threshold for {model_id} to -1e-6"
+                    )
+                    params["proba_threshold"][idx] = -1e-6
 
 
 def run_predict_inference(

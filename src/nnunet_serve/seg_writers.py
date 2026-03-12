@@ -544,6 +544,8 @@ class SegWriter:
                 segment_descriptions = [
                     self.segment_descriptions[class_idx - 1]
                 ]
+            else:
+                segment_descriptions = self.segment_descriptions
             if mask_array.ndim == 3:
                 mask_array = mask_array[..., None]
         image_datasets = [
@@ -574,15 +576,16 @@ class SegWriter:
                 meaning = ss.CodeMeaning
             else:
                 meaning = ss.meaning
-            label_meanings.append(meaning)
+            label_meanings.append(meaning.lower().replace(" structure of", ""))
         seg_series_description = "Seg of " + ", ".join(label_meanings)
         if len(seg_series_description) > 64:
             seg_series_description = seg_series_description[:61] + "..."
         if is_fractional_compliant:
             if len(segment_descriptions) > 1:
-                raise ValueError(
-                    "is_fractional_compliant==True requires single label"
+                logger.warning(
+                    "Skipping saving the fractional compliant mask because len(segment_descriptions) > 1"
                 )
+                return "skipped"
             seg_type = hd.seg.SegmentationTypeValues.BINARY
             logger.info("Converting mask to pseudo-fractional DICOM seg")
             sd = segment_descriptions[0]
@@ -918,6 +921,9 @@ def export_predictions(
                         f"Mask {i} is empty, skipping DICOM probabilities."
                     )
                     continue
+                elif status == "skipped":
+                    dicom_proba_paths.append(None)
+                    logger.info(f"Skipped saving the probabilistic DICOM")
                 dicom_proba_paths.append(output_path)
                 logger.info(
                     "Exported DICOM fractional segmentation %d to %s",
