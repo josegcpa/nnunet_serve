@@ -1180,10 +1180,6 @@ def single_model_inference(
     logger.info("Resampling input images to nnUNet model spacing")
     logger.info("Input size (before resampling): %s", volumes[0].GetSize())
 
-    volumes = [
-        resample_image(volume, spacing, do_separate_z=True)
-        for volume in volumes
-    ]
     logger.info("Running inference using %s", nnunet_path)
     logger.info("Folds: %s", use_folds)
     logger.info("Mirroring: %s", mirroring)
