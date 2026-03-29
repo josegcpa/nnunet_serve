@@ -416,6 +416,14 @@ class SeriesLoader:
         return self.loaded_resampled_volumes[identifier]
 
 
+def _get_len(i: int | list | None):
+    if i is None:
+        return 0
+    elif isinstance(i, int):
+        return 1
+    return len(i)
+
+
 def convert_predicted_logits_to_segmentation_with_correct_shape(
     predicted_logits: Union[torch.Tensor, np.ndarray],
     plans_manager: PlansManager,
@@ -518,7 +526,9 @@ def predict_from_data_iterator_local(
         n_classes = prediction.shape[0]
         logger.info("nnUNet: predicted logits")
         subset_state = None
-        if class_idx is not None:
+        n_labels = len(predictor.label_manager._all_labels) - 1
+        n_class_idx = _get_len(class_idx)
+        if (class_idx is not None) and n_class_idx != n_labels:
             subset_state = label_adapter.build_subset_state(class_idx)
             prediction = prediction[subset_state.prediction_indices]
 
@@ -546,7 +556,7 @@ def predict_from_data_iterator_local(
                     return_probabilities=save_probabilities,
                 )
             )
-        if class_idx is not None:
+        if subset_state:
             if save_probabilities is False:
                 processed_output = np.vectorize(
                     subset_state.correspondence_dict.get
@@ -1170,7 +1180,10 @@ def single_model_inference(
     logger.info("Resampling input images to nnUNet model spacing")
     logger.info("Input size (before resampling): %s", volumes[0].GetSize())
 
-    volumes = [resample_image(volume, spacing) for volume in volumes]
+    volumes = [
+        resample_image(volume, spacing, do_separate_z=True)
+        for volume in volumes
+    ]
     logger.info("Running inference using %s", nnunet_path)
     logger.info("Folds: %s", use_folds)
     logger.info("Mirroring: %s", mirroring)

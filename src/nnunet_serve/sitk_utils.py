@@ -11,52 +11,35 @@ import SimpleITK as sitk
 from scipy import ndimage
 from typing import Sequence
 
+from nnunetv2.preprocessing.resampling.default_resampling import (
+    get_do_separate_z,
+)
 from nnunet_serve.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
-
-def resample_image_to_target(
-    moving: sitk.Image,
-    target: sitk.Image,
-    is_mask: bool = False,
-) -> sitk.Image:
-    """
-    Resamples a SimpleITK image to the space of a target image.
-
-    Args:
-      moving: The SimpleITK image to resample.
-      target: The target SimpleITK image to match.
-      is_mask (bool): whether the moving image is a label mask.
-
-    Returns:
-      The resampled SimpleITK image matching the target properties.
-    """
-    if is_mask:
-        interpolation = sitk.sitkLabelLinear
-    else:
-        interpolation = sitk.sitkBSpline
-
-    output = sitk.Resample(moving, target, sitk.Transform(), interpolation, 0)
-    return output
+BASE_INTERPOLATOR = sitk.sitkBSpline
+BASE_INTERPOLATOR_Z_AXIS = sitk.sitkNearestNeighbor
 
 
-def resample_image(
+def _resample_image_standard(
     sitk_image: sitk.Image,
     out_spacing: Sequence[float] = [1.0, 1.0, 1.0],
     out_size: Sequence[int] = None,
     out_direction: Sequence[float] = None,
     out_origin: Sequence[float] = None,
     is_mask: bool = False,
-    interpolator=sitk.sitkLinear,
+    interpolator=BASE_INTERPOLATOR,
 ) -> sitk.Image:
-    """Resamples an SITK image to out_spacing. If is_mask is True, uses
-    nearest neighbour interpolation. Otherwise, it uses B-splines.
+    """Standard resampling of an SITK image.
 
     Args:
         sitk_image (sitk.Image): SITK image.
         out_spacing (Sequence, optional): target spacing for the image.
             Defaults to [1.0, 1.0, 1.0].
+        out_size (Sequence, optional): target size.
+        out_direction (Sequence, optional): target direction.
+        out_origin (Sequence, optional): target origin.
         is_mask (bool, optional): sets the interpolation to nearest neighbour.
             Defaults to False.
         interpolator (optional): interpolation method.
@@ -96,6 +79,136 @@ def resample_image(
         resample.SetInterpolator(interpolator)
 
     output: sitk.Image = resample.Execute(sitk_image)
+
+    return output
+
+
+def resample_image_separate_z(
+    sitk_image: sitk.Image,
+    out_spacing: Sequence[float] = [1.0, 1.0, 1.0],
+    is_mask: bool = False,
+    interpolator=BASE_INTERPOLATOR,
+) -> sitk.Image:
+    """Resamples an SITK image to out_spacing with decoupled z and xy axes.
+
+    Args:
+        sitk_image (sitk.Image): SITK image.
+        out_spacing (Sequence, optional): target spacing for the image.
+            Defaults to [1.0, 1.0, 1.0].
+        is_mask (bool, optional): sets the interpolation to nearest neighbour.
+            Defaults to False.
+        interpolator (optional): interpolation method for xy.
+            Defaults to sitk.sitkBSpline.
+
+    Returns:
+        sitk.Image: resampled SITK image.
+    """
+    original_spacing = sitk_image.GetSpacing()
+
+    intermediate_spacing = [out_spacing[0], out_spacing[1], original_spacing[2]]
+    xy_resampled = _resample_image_standard(
+        sitk_image,
+        out_spacing=intermediate_spacing,
+        is_mask=is_mask,
+        interpolator=interpolator,
+    )
+
+    z_interpolator = (
+        sitk.sitkLabelLinear if is_mask else BASE_INTERPOLATOR_Z_AXIS
+    )
+    final_resampled = _resample_image_standard(
+        xy_resampled,
+        out_spacing=out_spacing,
+        is_mask=is_mask,
+        interpolator=z_interpolator,
+    )
+
+    return final_resampled
+
+
+def resample_image(
+    sitk_image: sitk.Image,
+    out_spacing: Sequence[float] = [1.0, 1.0, 1.0],
+    is_mask: bool = False,
+    interpolator=BASE_INTERPOLATOR,
+    do_separate_z: bool = False,
+    *args,
+    **kwargs,
+) -> sitk.Image:
+    """Resamples an SITK image to out_spacing. Decouples z and xy if required.
+
+    Args:
+        sitk_image (sitk.Image): SITK image.
+        out_spacing (Sequence, optional): target spacing for the image.
+            Defaults to [1.0, 1.0, 1.0].
+        is_mask (bool, optional): sets the interpolation to nearest neighbour.
+            Defaults to False.
+        interpolator (optional): interpolation method.
+            Defaults to sitk.sitkBSpline.
+        do_separate_z (bool, optional): whether to decouple z and xy axes.
+            Defaults to False.
+        *args: additional arguments for the resampling function.
+        **kwargs: additional keyword arguments for resampling function.
+
+    Returns:
+        sitk.Image: resampled SITK image.
+    """
+    # SimpleITK spacing is (x, y, z). Reverse for nnUNet which expects (z, y, x).
+    original_spacing = sitk_image.GetSpacing()
+    do_separate_z = get_do_separate_z(original_spacing[::-1]) and do_separate_z
+
+    if do_separate_z:
+        return resample_image_separate_z(
+            sitk_image,
+            out_spacing=out_spacing,
+            is_mask=is_mask,
+            interpolator=interpolator,
+            *args,
+            **kwargs,
+        )
+    else:
+        return _resample_image_standard(
+            sitk_image,
+            out_spacing=out_spacing,
+            is_mask=is_mask,
+            interpolator=interpolator,
+            *args,
+            **kwargs,
+        )
+
+
+def resample_image_to_target(
+    moving: sitk.Image,
+    target: sitk.Image,
+    is_mask: bool = False,
+    interpolator=BASE_INTERPOLATOR,
+) -> sitk.Image:
+    """
+    Resamples a SimpleITK image to the space of a target image.
+
+    Args:
+        moving: The SimpleITK image to resample.
+        target: The target SimpleITK image to match.
+        is_mask (bool): whether the moving image is a label mask.
+        interpolator (sitk.sitkInterpolation): interpolation method.
+
+    Returns:
+        The resampled SimpleITK image matching the target properties.
+    """
+    target_size = target.GetSize()
+    target_spacing = target.GetSpacing()
+    target_direction = target.GetDirection()
+    target_origin = target.GetOrigin()
+
+    output = _resample_image_standard(
+        moving,
+        out_spacing=target_spacing,
+        out_size=target_size,
+        out_direction=target_direction,
+        out_origin=target_origin,
+        is_mask=is_mask,
+        interpolator=interpolator,
+    )
 
     return output
 
@@ -258,8 +371,9 @@ def get_crop(
     ]
     output_padding = list(map(int, output_padding))
 
-    logger.info("Output bounding box corner: %s", bounding_box[:3])
-    logger.info("Output bounding box size: %s", bounding_box[3:])
+    logger.info("Output bounding box corner (top): %s", bounding_box[:3])
+    logger.info("Output bounding box corner (bottom): %s", bounding_box[3:])
+    logger.info("Output bounding box size: %s", size)
     logger.info("Output padding: %s", output_padding)
 
     return bounding_box, output_padding
