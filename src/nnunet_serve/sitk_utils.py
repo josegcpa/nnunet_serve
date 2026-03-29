@@ -363,6 +363,20 @@ def pad_sitk(
     pad_upper: tuple[int, int, int],
     constant_value: int = 0,
 ) -> sitk.Image:
+    """
+    Pads an SITK image with a constant value. This wraps around
+    `sitk.ConstantPad` to handle vector images.
+
+    Args:
+        image (sitk.Image): input image.
+        pad_lower (tuple[int, int, int]): lower padding.
+        pad_upper (tuple[int, int, int]): upper padding.
+        constant_value (int, optional): constant value. Defaults to 0.
+
+    Returns:
+        sitk.Image: padded image.
+    """
+
     num_components = image.GetNumberOfComponentsPerPixel()
     if num_components == 1:
         return sitk.ConstantPad(
