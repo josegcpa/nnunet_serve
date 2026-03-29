@@ -213,28 +213,6 @@ def resample_image_to_target(
     return output
 
 
-def resample_sitk_bicubic(image: sitk.Image, new_spacing: Sequence[float]):
-    old_spacing = np.array(image.GetSpacing())
-    old_size = np.array(image.GetSize())
-
-    new_size = np.round(
-        old_size * (old_spacing / np.array(new_spacing))
-    ).astype(int)
-
-    arr = sitk.GetArrayFromImage(image)
-
-    zoom_factors = old_spacing[::-1] / np.array(new_spacing[::-1])
-
-    arr_resampled = ndimage.zoom(arr, zoom_factors, order=3)
-
-    resampled = sitk.GetImageFromArray(arr_resampled)
-    resampled.SetOrigin(image.GetOrigin())
-    resampled.SetDirection(image.GetDirection())
-    resampled.SetSpacing(new_spacing)
-
-    return resampled
-
-
 def to_closest_canonical_sitk(
     img: sitk.Image | list[sitk.Image],
 ) -> sitk.Image | list[sitk.Image]:
