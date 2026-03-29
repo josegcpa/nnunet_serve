@@ -355,3 +355,31 @@ def get_crop(
     logger.info("Output padding: %s", output_padding)
 
     return bounding_box, output_padding
+
+
+def pad_sitk(
+    image: sitk.Image,
+    pad_lower: tuple[int, int, int],
+    pad_upper: tuple[int, int, int],
+    constant_value: int = 0,
+) -> sitk.Image:
+    num_components = image.GetNumberOfComponentsPerPixel()
+    if num_components == 1:
+        return sitk.ConstantPad(
+            image,
+            pad_lower,
+            pad_upper,
+            constant_value,
+        )
+
+    padded_channels = []
+
+    for i in range(num_components):
+        channel = sitk.VectorIndexSelectionCast(image, i)
+
+        padded_channel = sitk.ConstantPad(
+            channel, pad_lower, pad_upper, constant_value
+        )
+        padded_channels.append(padded_channel)
+
+    return sitk.Compose(padded_channels)

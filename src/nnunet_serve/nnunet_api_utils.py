@@ -38,7 +38,7 @@ from nnunetv2.utilities.plans_handling.plans_handler import (
 
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter, export_predictions
-from nnunet_serve.sitk_utils import get_crop
+from nnunet_serve.sitk_utils import get_crop, pad_sitk
 from nnunet_serve.utils import (
     copy_information_nd,
     extract_lesion_candidates,
@@ -1018,11 +1018,18 @@ def process_proba_array(
         logger.warning("Mask is empty")
         empty = True
     if output_padding is not None:
-        pad_filter = sitk.ConstantPadImageFilter()
-        pad_filter.SetPadLowerBound(output_padding[:3])
-        pad_filter.SetPadUpperBound(output_padding[3:])
-        mask = pad_filter.Execute(mask)
-        proba_map = pad_filter.Execute(proba_map)
+        mask = pad_sitk(
+            mask,
+            output_padding[:3],
+            output_padding[3:],
+            0,
+        )
+        proba_map = pad_sitk(
+            proba_map,
+            output_padding[:3],
+            output_padding[3:],
+            0,
+        )
 
     return mask, proba_map, empty
 
@@ -1234,7 +1241,6 @@ def single_model_inference(
             intersect_with = intersect_with[
                 bb[0] : bb[3], bb[1] : bb[4], bb[2] : bb[5]
             ]
-        intersect_with = resample_image(intersect_with, spacing, is_mask=True)
     if proba_threshold is not None:
         mask, probability_map, _ = process_proba_array(
             proba_array,
