@@ -14,7 +14,7 @@
     * Example 1: segment prostate → crop to prostate → detect prostate cancer
     * Example 2: segment prostate zones → crop to prostate zones → use prostate zones as input → segment csPCa
     * Example 3: segment liver → crop to liver → segment HCC → exclude HCC with 0% overlap with liver
-4. Integration with Orthanc: Orthanc is the most open-source DICOM-web server, making nnunet_serve a very reasonable and appealing infrastructure for research
+4. Integration with Orthanc: Orthanc is one of the most popular open-source DICOM-web server, making `nnunet_serve` a very reasonable and appealing infrastructure for research
 5. TotalSegmentator integration: TotalSegmentator is the largest suite of nnU-Net models for multiple CT and MRI tasks. We improve on their framework and greatly reduce inference times through refactoring and keeping series/inferences in memory
 6. API: unlike typical workflows for nnU-Net, which depend on CLI-based routines, we have developed an API which guarantees integration with web-based services
 7. Integration with both [SNOMED-CT](https://www.nlm.nih.gov/healthit/snomedct/index.html) and [EUCAIM](https://hyperontology.eucaim.cancerimage.eu/) ontologies: ontology integration allows the simple specification of DICOM-seg/RTstruct metadata, lifting the burden of generating custom files for specific structures
