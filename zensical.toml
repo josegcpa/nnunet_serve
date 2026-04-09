@@ -34,7 +34,6 @@ extensions = [
 # ----------------------------------------------------------------------------
 [project.theme]
 language = "en"
-# change this to "classic" to use the traditional Material for MkDocs look.
 #variant = "classic"
 #favicon = "images/favicon.png"
 

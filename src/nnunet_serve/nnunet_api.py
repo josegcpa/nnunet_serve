@@ -28,7 +28,7 @@ from typing import Any, Annotated
 import fastapi
 import torch
 import yaml
-from fastapi import File, Request, UploadFile, Query
+from fastapi import File, Request, UploadFile, Body
 from fastapi.responses import FileResponse, JSONResponse
 from totalsegmentator.libs import download_pretrained_weights
 from totalsegmentator.map_to_binary import (
@@ -965,7 +965,7 @@ class nnUNetAPI:
         }
 
     async def infer(
-        self, inference_request: Annotated[InferenceRequest, Query()]
+        self, inference_request: Annotated[InferenceRequest, Body()]
     ):
         """
         Performs inference.
@@ -1176,7 +1176,7 @@ class nnUNetAPI:
             )
 
     async def infer_orthanc(
-        self, inference_request: Annotated[InferenceRequestOrthanc, Query()]
+        self, inference_request: Annotated[InferenceRequestOrthanc, Body()]
     ):
         """Run inference for Orthanc-backed inputs and push SEG back to Orthanc.
 
