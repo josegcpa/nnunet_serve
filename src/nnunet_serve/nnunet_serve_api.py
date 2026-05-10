@@ -54,6 +54,9 @@ def create_app() -> fastapi.FastAPI:
 
     @app.middleware("http")
     async def _rate_limit_middleware(request: fastapi.Request, call_next):
+        if "infer" not in request.url.path:
+            response = await call_next(request)
+            return response
         client_ip = request.client.host if request.client else "anonymous"
         now = time.time()
         with _rate_limit_lock:
