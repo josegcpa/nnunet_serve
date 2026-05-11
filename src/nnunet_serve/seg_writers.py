@@ -35,7 +35,7 @@ from nnunet_serve.coding import (
     NATURAL_LANGUAGE_TO_CODE,
 )
 from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.utils import sort_dicom_slices
+from cciu.dicom_utils import sort_dicom_slices
 from nnunet_serve.str_processing import get_laterality, to_camel_case
 
 logger = get_logger(__name__)

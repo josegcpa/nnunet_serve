@@ -40,7 +40,7 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 totalsegmentator = { git = "https://github.com/wasserth/TotalSegmentator" }
 pydicom-seg = { git = "https://github.com/josegcpa/pydicom-seg" }
-cciu = { git = "https://github.com/CCIG-Champalimaud/cciu" }
+cciu = { git = "https://github.com/CCIG-Champalimaud/cciu", rev = "a0355412b09006b476bc03fcc943c77e1e43bd0e" }
 
 [project.scripts]
 nnunet-predict = "nnunet_serve.entrypoints.entrypoint:main"
