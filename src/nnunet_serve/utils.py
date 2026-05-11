@@ -428,6 +428,16 @@ def get_contiguous_arr_idxs(
 
 
 def sort_dicom_slices(file_paths: list[str]) -> list[str]:
+    """
+    Sorts DICOM slices by instance number.
+
+    Args:
+        file_paths (list[str]): list of DICOM files.
+
+    Returns:
+        list[str]: sorted list of DICOM files.
+    """
+
     if len(file_paths) <= 1:
         return file_paths
 
@@ -437,106 +447,6 @@ def sort_dicom_slices(file_paths: list[str]) -> list[str]:
         instance_numbers.append(int(getattr(ds, "InstanceNumber")))
     order = np.argsort(np.array(instance_numbers))
     return [file_paths[i] for i in order]
-
-
-def read_dicom_as_sitk(
-    file_path: str,
-    metadata: dict[str, str] = {},
-    bvalue_for_filtering: int | None = None,
-) -> sitk.Image:
-    """
-    Reads a DICOM series as an SITK file.
-
-    Args:
-        file_path (str): list of DICOM files or directory containing DICOM
-            files.
-        metadata (dict[str, str]): metadata to be added to the SITK image.
-
-    Returns:
-        sitk.Image: SITK image.
-    """
-
-    def check_is_good(f):
-        """
-        Checks whether a DICOM file has the appropriate tags.
-
-        Args:
-            f (pydicom.Dataset):
-        """
-        if ((0x0020, 0x0037) in f) and ((0x0020, 0x0032) in f):
-            return True
-        return False
-
-    reader = sitk.ImageSeriesReader()
-    dicom_file_names = reader.GetGDCMSeriesFileNames(file_path)
-    good_file_paths = {}
-    dicom_file_dict = {f: dcmread(f) for f in dicom_file_names}
-    dicom_file_dict = {
-        k: v for k, v in dicom_file_dict.items() if check_is_good(v)
-    }
-    if len(dicom_file_dict) == 0:
-        raise RuntimeError(f"No DICOM files found in {file_path}")
-    if bvalue_for_filtering:
-        dicom_file_dict = filter_by_bvalue_from_dict(
-            dicom_file_dict, bvalue_for_filtering, exact=False
-        )
-    for dcm_file, f in dicom_file_dict.items():
-        acquisition_number = f.get((0x0020, 0x0012), None)
-        if acquisition_number is None:
-            acquisition_number = ""
-        else:
-            acquisition_number = acquisition_number.value
-        if acquisition_number not in good_file_paths:
-            good_file_paths[acquisition_number] = []
-        good_file_paths[acquisition_number].append(dcm_file)
-    good_file_paths = [
-        good_file_paths[k] for k in sorted(good_file_paths.keys())
-    ][0]
-    good_file_paths = sort_dicom_slices(good_file_paths)
-    reader.SetFileNames(good_file_paths)
-
-    sitk_image: sitk.Image = reader.Execute()
-
-    for k in metadata:
-        sitk_image.SetMetaData(k, metadata[k])
-    return sitk_image, good_file_paths
-
-
-def read_dicom_seg_as_volume(path: str) -> sitk.Image:
-    """
-    Reads a DICOM SEG object from disk and returns it as a volume image.
-
-    The function accepts either a directory containing a single DICOM SEG
-    file or a direct path to a DICOM file. It validates that the input file
-    has the expected SEG SOP Class UID and then uses ``MultiClassReader`` to
-    convert it into a ``SimpleITK.Image`` volume.
-
-    Args:
-        path (str): Path to a DICOM SEG file or a directory containing exactly
-            one such file.
-
-    Raises:
-        ValueError: If the provided directory contains more than one file.
-        AssertionError: If the DICOM file does not have the SEG SOP Class UID
-            ``1.2.840.10008.5.1.4.1.1.66.4``.
-
-    Returns:
-        sitk.Image: The decoded segmentation volume.
-    """
-    if os.path.isdir(path):
-        path = glob(os.path.join(path, "*"))
-        if len(path) > 1:
-            raise ValueError(
-                "The downloaded segmentation series contains more than one file"
-            )
-        path = path[0]
-    image = pydicom.dcmread(path)
-    assert (
-        image.SOPClassUID == "1.2.840.10008.5.1.4.1.1.66.4"
-    ), f"Expected SOPClassUID 1.2.840.10008.5.1.4.1.1.66.4, got {image.SOPClassUID}"
-    reader = MultiClassReader()
-    result = reader.read(image)
-    return result.image
 
 
 def get_study_uid(dicom_dir: str) -> str:

@@ -75,7 +75,7 @@ from nnunet_serve.totalseg_utils import (
 from nnunet_serve.seg_writers import SegWriter
 from nnunet_serve.utils import get_gpu_memory, wait_for_gpu
 from nnunet_serve.process_pool import ProcessPool
-from nnunet_serve.orthanc_access import download_series, upload_series
+from cciu.orthanc_utils import download_series, upload_series
 
 logger = get_logger(__name__)
 

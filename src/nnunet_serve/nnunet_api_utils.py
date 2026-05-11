@@ -35,20 +35,24 @@ from nnunetv2.utilities.plans_handling.plans_handler import (
     ConfigurationManager,
     PlansManager,
 )
+from cciu.sitk_utils import (
+    get_crop,
+    pad_sitk,
+    resample_image,
+    resample_image_to_target,
+)
 
 from nnunet_serve.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter, export_predictions
-from nnunet_serve.sitk_utils import get_crop, pad_sitk
+from cciu.sitk_utils import read_dicom_as_sitk
 from nnunet_serve.utils import (
     copy_information_nd,
     extract_lesion_candidates,
     intersect,
-    read_dicom_as_sitk,
     small_object_removal,
     wait_for_gpu,
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
-from nnunet_serve.sitk_utils import resample_image, resample_image_to_target
 from nnunet_serve.process_pool import ProcessPool
 
 
