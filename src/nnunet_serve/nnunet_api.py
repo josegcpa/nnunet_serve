@@ -248,6 +248,8 @@ def get_model_dictionary() -> tuple[dict, dict]:
     model_paths = [
         os.path.dirname(x) for x in Path(model_folder).rglob("fold_0")
     ]
+    # avoid issues with Mac paths....
+    model_paths = [m for m in model_paths if "__MACOSX" not in m]
     model_dictionary = {}
     for m in model_paths:
         match = pat.search(m)
