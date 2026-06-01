@@ -6,7 +6,6 @@ import os
 import shutil
 import tarfile
 import uuid
-import re
 import zipfile
 from pathlib import Path
 
