@@ -896,6 +896,7 @@ class nnUNetAPI:
             "error": error,
         }
         payload.update(extra_fields)
+        payload = make_json_serializable(payload)
         return payload
 
     def _raise_or_error_response(
