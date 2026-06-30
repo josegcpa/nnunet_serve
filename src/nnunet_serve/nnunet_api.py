@@ -163,6 +163,8 @@ def get_model_dictionary() -> tuple[dict, dict]:
             models_specs = yaml.safe_load(o)
     except Exception as e:
         raise RuntimeError(f"Failed to read/parse model spec YAML: {e}") from e
+    if "OVERRIDE_MODEL_FOLDER" in os.environ:
+        models_specs["model_folder"] = os.environ["OVERRIDE_MODEL_FOLDER"]
     if not isinstance(models_specs, dict):
         raise ValueError(
             "Model spec must be a YAML mapping/dictionary at top level"
