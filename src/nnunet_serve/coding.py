@@ -769,7 +769,7 @@ CATEGORY_MAPPING["SCT"] = {
     },
     "modifier": {
         "24028007": CATEGORIES["SCT"]["Laterality"],
-        "7771000": CATEOGORIES["Laterality"],
+        "7771000": CATEGORIES["Laterality"],
         "51440002": CATEGORIES["SCT"]["Laterality"],
     },
 }
