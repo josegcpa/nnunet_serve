@@ -806,7 +806,7 @@ def predict(
     device_id: int | None,
     params: dict,
     nnunet_path: str | list[str],
-    flip_xy: bool | list[bool] = False,
+    dicom_orientation: str | list[str | None] | None = None,
     writing_process_pool: ProcessPool | None = None,
 ) -> dict:
     """
@@ -821,8 +821,9 @@ def predict(
         device_id (int | None): GPU identifier.
         params (dict): parameters which will be used in wraper.
         nnunet_path (str | list[str]): path or paths to nnUNet model.
-        flip_xy (bool | list[bool]): whether to flip the x and y axes during
-            inference. Defaults to False.
+        dicom_orientation (str | list[str | None] | None): DICOM orientation
+            string (e.g. ``"RAS"``) to apply to inputs before inference, or
+            ``None`` to leave the orientation unchanged. Defaults to None.
         writing_process_pool (ProcessPool | None): process pool to use for parallel
             file saving operations. Defaults to None.
 
@@ -846,7 +847,7 @@ def predict(
         "crop_padding",
         "min_intersection",
         "cascade_mode",
-        "flip_xy",
+        "dicom_orientation",
         "bvalue_for_filtering",
     ]
     export_param_names = [
@@ -895,7 +896,7 @@ def predict(
         ) = multi_model_inference(
             series_paths=series_paths,
             nnunet_path=nnunet_path,
-            flip_xy=flip_xy,
+            dicom_orientation=dicom_orientation,
             mirroring=mirroring,
             device_id=device_id,
             min_mem=min_mem,
@@ -1101,7 +1102,7 @@ def single_model_inference(
     crop_padding: tuple[int, int, int] | None = None,
     min_intersection: float = 0.1,
     remove_objects_smaller_than: float | None = None,
-    flip_xy: bool = False,
+    dicom_orientation: str | None = None,
     min_mem: int | None = None,
 ) -> tuple[list[str], str, list[list[str]], sitk.Image]:
     """
@@ -1140,8 +1141,10 @@ def single_model_inference(
         remove_objects_smaller_than (float | None, optional): whether to remove
             objects smaller than this threshold. If a float is provided, it is
             considered as a percentage of the maximum object size. Defaults to None.
-        flip_xy (bool, optional): whether to flip the x and y axes of the input.
-            TotalSegmentator does this for some reason. Defaults to False.
+        dicom_orientation (str | None, optional): DICOM orientation string
+            (e.g. ``"RAS"``) to apply to inputs before inference using
+            ``sitk.DICOMOrient``, or ``None`` to leave the orientation
+            unchanged. Defaults to None.
         min_mem (int | None, optional): minimum amount of free memory required to
             use the GPU. Only used when ``device_id`` is None. Defaults to None.
 
@@ -1178,10 +1181,16 @@ def single_model_inference(
         raise ValueError(
             f"series_paths should have length {len(exp_chan)} ({exp_chan}) but has length {len(volumes)}"
         )
+    if dicom_orientation is not None:
+        logger.info("Orienting volumes to %s", dicom_orientation)
+        volumes = [sitk.DICOMOrient(v, dicom_orientation) for v in volumes]
+
     output_padding = None
     if crop_from is not None:
         if isinstance(crop_from, str):
             crop_from = sitk.ReadImage(crop_from)
+        if dicom_orientation is not None:
+            crop_from = sitk.DICOMOrient(crop_from, dicom_orientation)
         crop_from = filter_labels(crop_from, crop_class_idx, True)
         bb, output_padding = get_crop(crop_from, volumes[0], crop_padding)
         volumes = [
@@ -1207,8 +1216,6 @@ def single_model_inference(
     logger.info("Input direction: %s", volumes[0].GetDirection())
     logger.info("Input shape (array): %s", input_array.shape)
     logger.info("nnUNet: creating data iterator")
-    if flip_xy:
-        input_array = input_array[:, :, ::-1, ::-1]
     iterator = predictor.get_data_iterator_from_raw_npy_data(
         [input_array], None, [image_properties], None, 1
     )
@@ -1219,9 +1226,6 @@ def single_model_inference(
         save_probabilities=True,
         class_idx=class_idx,
     )[0]
-    if flip_xy:
-        mask_array = mask_array[..., ::-1, ::-1]
-        proba_array = proba_array[..., ::-1, ::-1]
 
     if remove_objects_smaller_than is not None:
         logger.info("Removing small objects")
@@ -1238,6 +1242,8 @@ def single_model_inference(
         "out_origin": original_origin,
     }
     if intersect_with is not None:
+        if dicom_orientation is not None:
+            intersect_with = sitk.DICOMOrient(intersect_with, dicom_orientation)
         intersect_with = filter_labels(
             intersect_with, intersect_with_class_idx, True
         )
@@ -1338,7 +1344,7 @@ def multi_model_inference(
     remove_objects_smaller_than: (
         float | tuple[float] | list[float] | None
     ) = None,
-    flip_xy: bool = False,
+    dicom_orientation: str | list[str | None] | None = None,
     bvalue_for_filtering: int | None = None,
     min_mem: int | None = None,
 ):
@@ -1378,8 +1384,10 @@ def multi_model_inference(
         remove_objects_smaller_than (float | tuple[float] | list[float] | None, optional):
             whether to remove objects smaller than this threshold. If a float is provided,
             it is considered as a percentage of the maximum object size. Defaults to None.
-        flip_xy (bool, optional): whether to flip the x and y axes of the input.
-            TotalSegmentator does this for some reason. Defaults to False.
+        dicom_orientation (str | list[str | None] | None, optional): DICOM
+            orientation string (e.g. ``"RAS"``) to apply to inputs before
+            inference, or ``None`` to leave the orientation unchanged.
+            Defaults to None.
         bvalue_for_filtering (int | None, optional): b-value to filter DICOM files by.
             Defaults to None.
         min_mem (int | None, optional): minimum amount of free memory required to
@@ -1424,6 +1432,7 @@ def multi_model_inference(
             checkpoint_name, len(nnunet_path)
         )
         use_folds = coherce_to_list(use_folds, len(nnunet_path))
+        dicom_orientation = coherce_to_list(dicom_orientation, len(nnunet_path))
 
         if series_paths_list is None:
             raise ValueError(
@@ -1462,7 +1471,7 @@ def multi_model_inference(
                 crop_class_idx=crop_class_idx,
                 crop_padding=crop_padding,
                 remove_objects_smaller_than=remove_objects_smaller_than[i],
-                flip_xy=flip_xy[i],
+                dicom_orientation=dicom_orientation[i],
                 min_mem=min_mem,
             )
             all_predictions.append(mask)
@@ -1504,7 +1513,7 @@ def multi_model_inference(
             crop_from=crop_from,
             crop_padding=crop_padding,
             remove_objects_smaller_than=remove_objects_smaller_than,
-            flip_xy=flip_xy,
+            dicom_orientation=dicom_orientation,
             min_mem=min_mem,
         )
         all_predictions = [mask]

@@ -518,7 +518,7 @@ def run_predict_inference(
     mirroring: bool,
     params: dict,
     nnunet_path: list[str],
-    is_totalseg: list[bool],
+    dicom_orientation: list[str | None],
     writing_process_pool: ProcessPool | None,
 ) -> tuple[dict, list[str], list[bool], str, str | None]:
     """
@@ -530,7 +530,9 @@ def run_predict_inference(
         mirroring (bool): Whether test-time mirroring is enabled.
         params (dict): Effective normalized inference parameters.
         nnunet_path (list[str]): Stage-wise model paths.
-        is_totalseg (list[bool]): Stage-wise TotalSegmentator flags.
+        dicom_orientation (list[str | None]): Stage-wise DICOM orientation
+            strings (e.g. ``"RAS"``) to apply before inference, or ``None`` to
+            leave the image orientation unchanged.
         writing_process_pool (ProcessPool | None): Optional process pool for
             asynchronous export writes.
 
@@ -547,7 +549,7 @@ def run_predict_inference(
             device_id=None,
             params=params,
             nnunet_path=nnunet_path,
-            flip_xy=is_totalseg,
+            dicom_orientation=dicom_orientation,
             writing_process_pool=writing_process_pool,
         )
         status = SUCCESS_STATUS
@@ -561,7 +563,7 @@ def run_predict_inference(
                 device_id=None,
                 params=params,
                 nnunet_path=nnunet_path,
-                flip_xy=is_totalseg,
+                dicom_orientation=dicom_orientation,
                 writing_process_pool=writing_process_pool,
             )
             status = SUCCESS_STATUS
@@ -1094,7 +1096,7 @@ class nnUNetAPI:
             mirroring=mirroring,
             params=params,
             nnunet_path=nnunet_path,
-            is_totalseg=is_totalseg,
+            dicom_orientation=["RAS" if t else None for t in is_totalseg],
             writing_process_pool=self.writing_process_pool,
         )
         b = time.time()
