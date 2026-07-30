@@ -98,6 +98,9 @@ dependencies = [
     { name = "unittest2" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9c/f8/bff7e5eaf85b064a85bf8827a6bda04e92e2ff4d2e908c45033344886b44/batchgenerators-0.25.1.tar.gz", hash = "sha256:4663a7f393bf1681d7675648362ba3f11b2a9474fb17228a92aac5d1ad28bb39", size = 76970, upload-time = "2024-11-07T06:56:32.595Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/9b/80dd928c6a3a8873677d2aba70274cbe2e411c3f260d063396d50fd5ace4/batchgenerators-0.25.1-py3-none-any.whl", hash = "sha256:edaa428031692eeac06371e12d08f9895cd743d72dc0a33c53acc9d2aad7f74a", size = 100740, upload-time = "2026-05-12T06:56:06.509Z" },
+]
 
 [[package]]
 name = "batchgeneratorsv2"
@@ -172,14 +175,17 @@ wheels = [
 [[package]]
 name = "cciu"
 version = "0.1.0"
-source = { git = "https://github.com/CCIG-Champalimaud/cciu?rev=a0355412b09006b476bc03fcc943c77e1e43bd0e#a0355412b09006b476bc03fcc943c77e1e43bd0e" }
+source = { git = "https://github.com/CCIG-Champalimaud/cciu#a37b9143529482ddda8b65e45bf7981ccddb8a70" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pydicom" },
     { name = "pydicom-seg" },
+    { name = "pytest" },
+    { name = "pyyaml" },
     { name = "requests" },
     { name = "simpleitk" },
+    { name = "tqdm" },
 ]
 
 [[package]]
@@ -975,13 +981,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/30/fe/ea18b0514128a60830c4909e23add385f8e799ff9719bc0b5de82673baa1/imagecodecs-2025.11.11-cp311-abi3-win32.whl", hash = "sha256:3735ea088321b0685e593c5d44fc1d146a84fcf6645c52ed136fa576e16c3572", size = 14847479, upload-time = "2025-11-10T04:20:17.502Z" },
     { url = "https://files.pythonhosted.org/packages/01/b8/287a2d64f746e3bdf44693d2013b5fb7440eafe1dca08a35a0fd30458d33/imagecodecs-2025.11.11-cp311-abi3-win_amd64.whl", hash = "sha256:4252b15f5ba55bc7d7aacf621f6bb6e73fd70e66d56277a1f26563198b2cd576", size = 19052271, upload-time = "2025-11-10T04:20:21.441Z" },
     { url = "https://files.pythonhosted.org/packages/a3/c8/413154b6014d9e1ee2b717bfdfa6617e81557b44487e2fb2a88ca3da125b/imagecodecs-2025.11.11-cp311-abi3-win_arm64.whl", hash = "sha256:f4480973fcf2d826ba6806b7ac6f4d9bd72eeb557cfd3687ac885939d130ec47", size = 14529653, upload-time = "2025-11-10T04:20:24.675Z" },
-    { url = "https://files.pythonhosted.org/packages/8c/2e/6a7117f2fe8e83c6ed58ad237625e4e82e139f67ce4695c457789e43cdc5/imagecodecs-2025.11.11-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:bb0f4714e60dd94b94ca778b872fb90b885b83381228743903035d79b7e91a88", size = 12448096, upload-time = "2025-11-10T04:20:27.739Z" },
-    { url = "https://files.pythonhosted.org/packages/24/96/0c479746198723c53326c65edf56331d8e910afaa2fa132358ca8d5a6177/imagecodecs-2025.11.11-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:faf4ab8f2f11694aa2d6ed7548ce1d1598a14e326a6bb3d50669ed5c7da764c6", size = 10433730, upload-time = "2025-11-10T04:20:30.113Z" },
-    { url = "https://files.pythonhosted.org/packages/b4/19/de48587d37aa2bc355313abdfdda801c7a26235ec66bfad19ff3ee0b7b23/imagecodecs-2025.11.11-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fdb475f54d0abac3cfcde42ec47f606eea1d4afa52173420577317102d361ae5", size = 25835500, upload-time = "2025-11-10T04:20:33.538Z" },
-    { url = "https://files.pythonhosted.org/packages/17/47/26edea4799c1250ad34305544fb69a65d6151dbe623508ed71537a678e7e/imagecodecs-2025.11.11-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e3d4cb2dc507c0bab057321333927575d1d611efe368e76b752f5ad3c55856ad", size = 25952929, upload-time = "2025-11-10T04:20:37.22Z" },
-    { url = "https://files.pythonhosted.org/packages/31/75/d720db7e0d654d3fd0db253ed8b8a83fad6d87735132fb01326c4f720fd7/imagecodecs-2025.11.11-cp314-cp314t-win32.whl", hash = "sha256:7bcc214d6f6ecd2bd7b648a6ac5589edcde946bcb738b6c763ce1c864934c58c", size = 15467675, upload-time = "2025-11-10T04:20:42.881Z" },
-    { url = "https://files.pythonhosted.org/packages/c0/fd/1a1eb89f9d1f9256d0fbb9f328607a1215710e19d4086bc602e8543423e4/imagecodecs-2025.11.11-cp314-cp314t-win_amd64.whl", hash = "sha256:58dbc0095142dcef55aaac392ee5bd8fb7c3656753e3c37424c3612209c656a4", size = 19915854, upload-time = "2025-11-10T04:20:46.006Z" },
-    { url = "https://files.pythonhosted.org/packages/59/27/2fa20c89149eed89949c34654bb3643f2aa229492e05fbd2ffadb5e4dc41/imagecodecs-2025.11.11-cp314-cp314t-win_arm64.whl", hash = "sha256:dd61871455ae6c3486051e68e0d576d54e53c45d157ce233c4a09269f132bf48", size = 15098090, upload-time = "2025-11-10T04:20:48.985Z" },
 ]
 
 [[package]]
@@ -1678,7 +1677,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cachetools", specifier = ">=6.2.1" },
-    { name = "cciu", git = "https://github.com/CCIG-Champalimaud/cciu?rev=a0355412b09006b476bc03fcc943c77e1e43bd0e" },
+    { name = "cciu", git = "https://github.com/CCIG-Champalimaud/cciu" },
     { name = "dicom2nifti", specifier = ">=2.6.0" },
     { name = "fastapi", specifier = ">=0.119.0" },
     { name = "highdicom", specifier = ">=0.23" },
@@ -2624,7 +2623,7 @@ wheels = [
 
 [[package]]
 name = "pytest"
-version = "9.0.0"
+version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
@@ -2635,9 +2634,9 @@ dependencies = [
     { name = "pygments" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/1d/eb34f286b164c5e431a810a38697409cca1112cee04b287bb56ac486730b/pytest-9.0.0.tar.gz", hash = "sha256:8f44522eafe4137b0f35c9ce3072931a788a21ee40a2ed279e817d3cc16ed21e", size = 1562764, upload-time = "2025-11-08T17:25:33.34Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/99/cafef234114a3b6d9f3aaed0723b437c40c57bdb7b3e4c3a575bc4890052/pytest-9.0.0-py3-none-any.whl", hash = "sha256:e5ccdf10b0bac554970ee88fc1a4ad0ee5d221f8ef22321f9b7e4584e19d7f96", size = 373364, upload-time = "2025-11-08T17:25:31.811Z" },
+    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
 ]
 
 [[package]]
@@ -3549,14 +3548,14 @@ dependencies = [
 
 [[package]]
 name = "tqdm"
-version = "4.67.1"
+version = "4.70.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737, upload-time = "2024-11-24T20:12:22.481Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/3b/6c24bec5be5e743ffd99576daa5cc077722fc7d5bbc00bd133fa0c698dc6/tqdm-4.70.0.tar.gz", hash = "sha256:55b0b0dbd97462d06ebee91e4dac24ed4d4702be82b24f07e6c1d27e08cea220", size = 795438, upload-time = "2026-07-27T11:33:15.271Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2", size = 78540, upload-time = "2024-11-24T20:12:19.698Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/1c/01bfd571a64e7f270e6bab5e33777debe0edc56759233ce84f27dec92d14/tqdm-4.70.0-py3-none-any.whl", hash = "sha256:7f585706bfddbdebf89daac705b2dfcc16890130727d3197ca62c732b4310953", size = 80184, upload-time = "2026-07-27T11:33:13.167Z" },
 ]
 
 [[package]]
