@@ -3,28 +3,32 @@ Command line utility to perform nnU-Net inference on a multiple studies in SITK
 or DICOM format.
 """
 
-import json
-import os
-import re
-import pprint
-import shutil
-import sys
-import asyncio
-from pathlib import Path
-
-import torch
-
-from nnunet_serve.api_datamodels import InferenceRequest
-from nnunet_serve.nnunet_api import nnUNetAPI
-from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
-from nnunet_serve.process_pool import WritingProcessPool
-from nnunet_serve.utils import make_parser
 from nnunet_serve.logging_utils import get_logger, add_file_handler_to_manager
+from nnunet_serve.utils import make_parser
 
 logger = get_logger(__name__)
 
 
 def main_with_args(args):
+    import json
+    import os
+    import re
+    import pprint
+    import shutil
+    import asyncio
+    from pathlib import Path
+
+    from nnunet_serve.api_datamodels import InferenceRequest
+    from nnunet_serve.nnunet_api import nnUNetAPI
+    from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
+    from nnunet_serve.process_pool import WritingProcessPool
+    from nnunet_serve.utils import make_parser
+    from nnunet_serve.logging_utils import (
+        get_logger,
+        add_file_handler_to_manager,
+    )
+    from nnunet_serve.entrypoints.entrypoint import get_set_args
+
     if args.data_json is None and args.data_dir is None:
         raise ValueError("Must provide either --data_json or --data_dir")
     if args.data_json:
@@ -63,7 +67,6 @@ def main_with_args(args):
                     }
                 )
 
-    print(data)
     add_file_handler_to_manager(
         log_path=os.path.join(data[0]["output_dir"], "nnunet_serve_proc.log"),
         exclude=[
@@ -107,7 +110,7 @@ def main_with_args(args):
             suffix=args.suffix,
         )
 
-        all_set_args = [k.lstrip("-") for k in sys.argv[1:] if "-" in k]
+        all_set_args = get_set_args()
         all_set_args.extend(list(item.keys()))
         # ensures that only the arguments that were set in the CLI are actually used
         inference_request.__pydantic_fields_set__ = [
@@ -160,6 +163,8 @@ def main_with_args(args):
 
 
 def main():
+    import torch
+
     parser = make_parser(
         description="Batch inference for nnunet_serve.",
         exclude=[
