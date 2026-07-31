@@ -27,25 +27,54 @@ models:
     default_args:
       series_folders: ["inputs/seriesT2"]
       use_folds: [0, 1, 2, 3, 4]
-      tta: false
+      tta: true
       checkpoint_name: "checkpoint_best.pth"
-  - id: prostate_aggressive_lesion_mri
-    rel_path: prostate_aggressive_lesion_model
-    name: "Prostate aggressive lesion detection model"
-    aliases: [aggressive_lesion]
+  - id: prostate_clinically_significant_lesion_bpmri
+    rel_path: prostate_cspca_bpmri
+    name: "Prostate clnically significant lesion detection model"
+    aliases: [prostate_aggressive_lesion]
     metadata:
       path: metadata/prostate-aggressive-lesion.json
     min_mem: 4000
     default_args:
       series_folders:
-        ["inputs/seriesT2", "inputs/seriesDWI", "inputs/seriesADC"]
+        - "inputs/seriesT2"
+        - "inputs/seriesDWI"
+        - "inputs/seriesADC"
+        - "from:prostate_zone_mri[2]"
+        - "from:prostate_zone_mri[1]"
       use_folds: [0, 1, 2, 3, 4]
       proba_threshold: 0.1
-      min_confidence: 0.5
+      min_confidence: 0.1
       tta: true
       save_proba_map: true
-      checkpoint_name: "checkpoint_best.pth"
+      checkpoint_name: "checkpoint_final.pth"
       class_idx: 1 # required to save probability maps
+      bvalue_for_filtering: 1400
+      crop_padding: [0.2, 0.2, 0.2]
+  - id: prostate_lesion_bpmri
+    rel_path: lesion_rg_ssl_model
+    name: "Prostate lesion detection model"
+    aliases: [prostate_lesion]
+    metadata:
+      path: metadata/prostate-lesion.json
+    min_mem: 4000
+    default_args:
+      series_folders:
+        - "inputs/seriesT2"
+        - "inputs/seriesDWI"
+        - "inputs/seriesADC"
+        - "from:prostate_zone_mri[2]"
+        - "from:prostate_zone_mri[1]"
+      use_folds: [0, 1, 2, 3, 4]
+      proba_threshold: 0.1
+      min_confidence: 0.1
+      tta: true
+      save_proba_map: true
+      checkpoint_name: "checkpoint_final.pth"
+      class_idx: 1 
+      bvalue_for_filtering: 1400
+      crop_padding: [0.2, 0.2, 0.2]
   - id: whole_body_ct
     rel_path: Dataset300_body_6mm_1559subj
     name: "Whole body CT segmentation model (from TotalSegmentator)"
@@ -113,8 +142,17 @@ models:
       proba_threshold: null
   - id: total_fast_ct
     totalseg_task: "total_fast"
+  - id: body_ct
+    totalseg_task: "body"
+  - id: body_mr
+    totalseg_task: "body_mr"
   - id: organ_ct
     totalseg_task: "organ_ct"
+    default_args:
+      crop_padding: [0.1, 0.1, 0.1]
+  - id: organ_mr
+    aliases: [organ_mr]
+    totalseg_task: "organ_mr"
   - id: hepatic_couinaud_segments_ct
     totalseg_task: "liver_segments"
   - id: hcc_arterial_ct

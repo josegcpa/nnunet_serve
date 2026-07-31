@@ -8,7 +8,7 @@ from nnunet_serve.entrypoints.entrypoint import (
     main_with_args as main_with_args_entrypoint,
 )
 from nnunet_serve.utils import make_parser
-from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

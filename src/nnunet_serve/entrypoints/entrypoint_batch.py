@@ -3,8 +3,11 @@ Command line utility to perform nnU-Net inference on a multiple studies in SITK
 or DICOM format.
 """
 
-from nnunet_serve.logging_utils import get_logger, add_file_handler_to_manager
-from nnunet_serve.utils import make_parser
+from nnunet_serve.utils.logging_utils import (
+    get_logger,
+    add_file_handler_to_manager,
+)
+from nnunet_serve.utils.parser import make_parser
 
 logger = get_logger(__name__)
 
@@ -20,10 +23,10 @@ def main_with_args(args):
 
     from nnunet_serve.api_datamodels import InferenceRequest
     from nnunet_serve.nnunet_api import nnUNetAPI
-    from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
+    from nnunet_serve.utils.nnunet_api_utils import SUCCESS_STATUS
     from nnunet_serve.process_pool import WritingProcessPool
     from nnunet_serve.utils import make_parser
-    from nnunet_serve.logging_utils import (
+    from nnunet_serve.utils.logging_utils import (
         get_logger,
         add_file_handler_to_manager,
     )
@@ -70,7 +73,7 @@ def main_with_args(args):
     add_file_handler_to_manager(
         log_path=os.path.join(data[0]["output_dir"], "nnunet_serve_proc.log"),
         exclude=[
-            "nnunet_serve.nnunet_api_utils",
+            "nnunet_serve.utils.nnunet_api_utils",
             "nnunet_serve.nnunet_api",
         ],
     )

@@ -9,7 +9,7 @@ from highdicom.sr.coding import CodedConcept
 from pydicom.sr.codedict import codes, Code
 from pydicom.sr._concepts_dict import concepts as CONCEPTS
 
-from nnunet_serve.str_processing import to_camel_case
+from nnunet_serve.utils.str_processing import to_camel_case
 
 CATEGORIES = {}
 CATEGORIES["SCT"] = {

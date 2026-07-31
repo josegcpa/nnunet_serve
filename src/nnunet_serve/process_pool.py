@@ -8,7 +8,7 @@ results, without tying up the main application process.
 """
 
 from multiprocessing import Process, Queue
-from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.utils.logging_utils import get_logger
 from nnunet_serve.seg_writers import export_predictions
 
 logger = get_logger(__name__)

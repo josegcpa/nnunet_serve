@@ -1,0 +1,18 @@
+[Unit]
+Description=Instantiates a nnU-Net serve API.
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bash /home/jose_almeida/projects/nnunet_docker/start-nnunet-api.sh
+Restart=on-failure
+RestartSec=5
+
+User=jose_almeida
+
+# Basic hardening
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

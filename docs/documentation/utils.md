@@ -1,3 +1,3 @@
-# General utililities
+# Utililities
 
 ::: nnunet_serve.utils

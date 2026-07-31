@@ -5,8 +5,8 @@ or DICOM format.
 
 import sys
 from pprint import pprint
-from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.utils import make_parser
+from nnunet_serve.utils.logging_utils import get_logger
+from nnunet_serve.utils.parser import make_parser
 
 logger = get_logger(__name__)
 
@@ -42,9 +42,9 @@ def main_with_args(args):
     from pathlib import Path
 
     from nnunet_serve.nnunet_api import nnUNetAPI
-    from nnunet_serve.nnunet_api_utils import SUCCESS_STATUS
+    from nnunet_serve.utils.nnunet_api_utils import SUCCESS_STATUS
     from nnunet_serve.api_datamodels import InferenceRequest
-    from nnunet_serve.logging_utils import (
+    from nnunet_serve.utils.logging_utils import (
         add_file_handler_to_manager,
         get_logger,
     )

@@ -2,12 +2,12 @@
 Utilities for nnU-Net model serving. The core functions handling the prediction
 workflows are:
 
-1. [single_model_inference][nnunet_serve.nnunet_api_utils.single_model_inference] - runs the inference
+1. [single_model_inference][nnunet_serve.utils.nnunet_api_utils.single_model_inference] - runs the inference
 for a single model.
-2. [multi_model_inference][nnunet_serve.nnunet_api_utils.multi_model_inference] - runs the inference
+2. [multi_model_inference][nnunet_serve.utils.nnunet_api_utils.multi_model_inference] - runs the inference
 using multiple models (i.e. a model _cascade_).
-3. [predict][nnunet_serve.nnunet_api_utils.predict] - wrapper around
-[multi_model_inference][nnunet_serve.nnunet_api_utils.multi_model_inference] which also handles file saving.
+3. [predict][nnunet_serve.utils.nnunet_api_utils.predict] - wrapper around
+[multi_model_inference][nnunet_serve.utils.nnunet_api_utils.multi_model_inference] which also handles file saving.
 """
 
 import json
@@ -42,7 +42,7 @@ from cciu.sitk_utils import (
     resample_image_to_target,
 )
 
-from nnunet_serve.logging_utils import get_logger
+from nnunet_serve.utils.logging_utils import get_logger
 from nnunet_serve.seg_writers import SegWriter, export_predictions
 from cciu.sitk_utils import read_dicom_as_sitk
 from nnunet_serve.utils import (
@@ -54,7 +54,6 @@ from nnunet_serve.utils import (
 )
 from nnunet_serve.api_datamodels import InferenceRequestBase, CheckpointName
 from nnunet_serve.process_pool import ProcessPool
-
 
 logger = get_logger(__name__)
 SUCCESS_STATUS = "done"

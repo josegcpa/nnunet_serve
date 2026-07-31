@@ -5,7 +5,7 @@ operations, including:
 
 1. Health and readiness endpoints for liveness and configuration checks.
 2. Inference endpoints accepting uploaded data or Orthanc references and
-   delegating prediction to [nnunet_serve.nnunet_api_utils][].
+   delegating prediction to [nnunet_serve.utils.nnunet_api_utils][].
 3. Utility endpoints for retrieving model metadata, JSON schemas, cached
    results, and housekeeping tasks such as cache expiration.
 """
@@ -49,14 +49,17 @@ from nnunet_serve.api_datamodels import (
     JSONSchema,
     ModelInfoResponse,
 )
-from nnunet_serve.file_utils import (
+from nnunet_serve.utils.file_utils import (
     get_study_path,
     store_uploaded_file,
     zip_directory,
     NNUNET_OUTPUT_DIR,
 )
-from nnunet_serve.logging_utils import get_logger, add_file_handler_to_manager
-from nnunet_serve.nnunet_api_utils import (
+from nnunet_serve.utils.logging_utils import (
+    get_logger,
+    add_file_handler_to_manager,
+)
+from nnunet_serve.utils.nnunet_api_utils import (
     FAILURE_STATUS,
     SUCCESS_STATUS,
     CACHE,
@@ -67,7 +70,7 @@ from nnunet_serve.nnunet_api_utils import (
     get_series_paths,
     predict,
 )
-from nnunet_serve.totalseg_utils import (
+from nnunet_serve.utils.totalseg_utils import (
     TASK_CONVERSION,
     REVERSE_TASK_CONVERSION,
     load_snomed_mapping_expanded,

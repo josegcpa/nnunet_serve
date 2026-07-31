@@ -1,5 +1,5 @@
 """
-Implementation of a nnUNet server API. 
+Implementation of a nnUNet server API.
 
 Depends on ``model-serve-spec.yaml`` which should be specified in the directory
 where nnunet_serve is utilized.
@@ -14,8 +14,8 @@ import uvicorn
 import asyncio
 from contextlib import asynccontextmanager
 
-from nnunet_serve.logging_utils import get_logger
-from nnunet_serve.nnunet_api_utils import CACHE
+from nnunet_serve.utils.logging_utils import get_logger
+from nnunet_serve.utils.nnunet_api_utils import CACHE
 from nnunet_serve.nnunet_api import nnUNetAPI
 
 logger = get_logger(__name__)
