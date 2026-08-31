@@ -35,7 +35,7 @@ from nnunet_serve.coding import (
     NATURAL_LANGUAGE_TO_CODE,
 )
 from nnunet_serve.utils.logging_utils import get_logger
-from cciu.dicom_utils import sort_dicom_datasets
+from cciu.dicom_utils import sort_dicom_files
 from nnunet_serve.utils.str_processing import get_laterality, to_camel_case
 
 logger = get_logger(__name__)
@@ -502,7 +502,7 @@ class SegWriter:
                 ``is_fractional_compliant==True``.
         """
         mask_array = self.to_array_if_necessary(mask_array)
-        sorted_source_files = sort_dicom_datasets(list(source_files))
+        sorted_source_files = sort_dicom_files(list(source_files))
         any_fractional = is_fractional or is_fractional_compliant
         if sorted_source_files != list(source_files):
             idx_map = {p: i for i, p in enumerate(source_files)}

@@ -175,7 +175,7 @@ wheels = [
 [[package]]
 name = "cciu"
 version = "0.1.0"
-source = { git = "https://github.com/CCIG-Champalimaud/cciu#a37b9143529482ddda8b65e45bf7981ccddb8a70" }
+source = { git = "https://github.com/CCIG-Champalimaud/cciu#3e0a7f418da429e73057960570e127bf89864a4d" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
