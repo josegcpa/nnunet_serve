@@ -44,10 +44,7 @@ def main_with_args(args):
     from nnunet_serve.nnunet_api import nnUNetAPI
     from nnunet_serve.utils.nnunet_api_utils import SUCCESS_STATUS
     from nnunet_serve.api_datamodels import InferenceRequest
-    from nnunet_serve.utils.logging_utils import (
-        add_file_handler_to_manager,
-        get_logger,
-    )
+    from nnunet_serve.utils.logging_utils import add_file_handler_to_manager
 
     add_file_handler_to_manager(
         log_path=os.path.join(args.output_dir, "nnunet_serve.log")

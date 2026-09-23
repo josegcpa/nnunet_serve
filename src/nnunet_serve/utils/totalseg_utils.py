@@ -19,7 +19,7 @@ TASK_CONVERSION = {
     "muscle_ct": 294,
     "ribs_ct": 295,
     "organ_mr": 850,
-    "vertebrae_mr": 851,
+    "muscles": 851,
     "total_mr_fast": 852,
     "total_mr_fastest": 853,
     "lung_vessels": 258,

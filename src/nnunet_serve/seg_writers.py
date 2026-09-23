@@ -923,7 +923,7 @@ def export_predictions(
                     continue
                 elif status == "skipped":
                     dicom_proba_paths.append(None)
-                    logger.info(f"Skipped saving the probabilistic DICOM")
+                    logger.info("Skipped saving the probabilistic DICOM")
                 dicom_proba_paths.append(output_path)
                 logger.info(
                     "Exported DICOM fractional segmentation %d to %s",

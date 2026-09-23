@@ -836,11 +836,11 @@ class nnUNetAPI:
                 try:
                     meaning = sd[i][0x0062, 0x000F][0][0x0008, 0x0104].value
                 except KeyError:
-                    meaning = None
+                    meaning = None  # noqa: F841
                 try:
                     laterality = sd[i][0x0062, 0x0011][0][0x0008, 0x0104].value
                 except KeyError:
-                    laterality = None
+                    laterality = None  # noqa: F841
                 sd[i] = {
                     "Label ID": model_labels[i + 1],
                     "Name": label,

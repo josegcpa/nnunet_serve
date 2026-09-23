@@ -3,6 +3,7 @@ Command line utility to perform nnU-Net inference on a multiple studies in SITK
 or DICOM format.
 """
 
+import pprint
 from nnunet_serve.utils.logging_utils import (
     get_logger,
     add_file_handler_to_manager,
@@ -16,7 +17,6 @@ def main_with_args(args):
     import json
     import os
     import re
-    import pprint
     import shutil
     import asyncio
     from pathlib import Path
@@ -25,11 +25,6 @@ def main_with_args(args):
     from nnunet_serve.nnunet_api import nnUNetAPI
     from nnunet_serve.utils.nnunet_api_utils import SUCCESS_STATUS
     from nnunet_serve.process_pool import WritingProcessPool
-    from nnunet_serve.utils import make_parser
-    from nnunet_serve.utils.logging_utils import (
-        get_logger,
-        add_file_handler_to_manager,
-    )
     from nnunet_serve.entrypoints.entrypoint import get_set_args
 
     if args.data_json is None and args.data_dir is None:

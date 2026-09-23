@@ -8,10 +8,8 @@ points to keep higher-level code focused on orchestration rather than low-
 level plumbing.
 """
 
-import os
 import subprocess as sp
 import time
-import argparse
 from typing import Sequence
 from glob import glob
 
@@ -464,11 +462,11 @@ def extract_lesion_candidates(
 
     if intersect_with is not None:
         if isinstance(intersect_with, str):
-            logger.info(f"Intersecting with %s", intersect_with)
+            logger.info("Intersecting with %s", intersect_with)
             intersect_with = sitk.ReadImage(intersect_with)
         if isinstance(intersect_with, sitk.Image):
             logger.info(
-                f"Intersecting with image with size %s",
+                "Intersecting with image with size %s",
                 intersect_with.GetSize(),
             )
             intersect_with = sitk.GetArrayFromImage(intersect_with)

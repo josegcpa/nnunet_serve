@@ -1172,7 +1172,7 @@ def single_model_inference(
     original_size = volumes[0].GetSize()
     original_direction = volumes[0].GetDirection()
     original_origin = volumes[0].GetOrigin()
-    spacing = predictor.configuration_manager.spacing[::-1]
+    spacing = predictor.configuration_manager.spacing[::-1]  # noqa: F841
 
     predictor.dataset_json["file_ending"] = ".nii.gz"
     exp_chan = predictor.dataset_json["channel_names"]
