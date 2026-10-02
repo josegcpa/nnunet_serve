@@ -1084,6 +1084,7 @@ CATEGORY_MAPPING["EUCAIM"] = {
         "BP1000055": CATEGORIES["EUCAIM"]["Body structure"],
         "BP1000096": CATEGORIES["EUCAIM"]["Body structure"],
         "BP1000423": CATEGORIES["EUCAIM"]["Body structure"],
+        "CLIN1036328": CATEGORIES["EUCAIM"]["Body structure"],
     },
     "modifier": {
         "IMG1016670": "IMG1016305",
