@@ -1406,6 +1406,7 @@ NATURAL_LANGUAGE_TO_CODE["EUCAIM"] = {
     "Ascending colon structure": "CLIN1063371",
     "Anatomical structure": "BP1000055",
     "Structure of body conduit": "BP1000096",
+    "Neoplasm": "CLIN1036328",
 }
 # convert the EUCAIM dict to the correct format (camel case keys)
 new_dict = {}
