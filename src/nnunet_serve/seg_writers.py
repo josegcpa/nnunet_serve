@@ -23,7 +23,10 @@ import SimpleITK as sitk
 from matplotlib import colormaps
 from pydicom import DataElement
 from pydicom.sr.codedict import Code, codes
-from nnunet_serve.pydicom_seg_template import rgb_to_cielab, from_dcmqi_metainfo
+from nnunet_serve.pydicom_seg_template import (
+    rgb_to_cielab,
+    from_dcmqi_metainfo,
+)
 from tqdm import tqdm
 
 from nnunet_serve.coding import (
@@ -371,7 +374,6 @@ class SegWriter:
             raise ValueError(
                 "Either segment_descriptions or segment_names must be provided"
             )
-        category_concepts = CATEGORY_CONCEPTS[DEFAULT_SEGMENT_SCHEME]
         self.algorithm_identification = hd.AlgorithmIdentificationSequence(
             name=self.algorithm_name,
             version=self.algorithm_version,
@@ -383,6 +385,8 @@ class SegWriter:
             self.segment_descriptions = []
         for i, segment in enumerate(self.segment_names):
             type_code, segment_dict = get_segment_type_code(segment, i)
+            segment_scheme = segment_dict.get("scheme", DEFAULT_SEGMENT_SCHEME)
+            category_concepts = CATEGORY_CONCEPTS[segment_scheme]
             category_code = [
                 category_concepts[k]
                 for k in category_concepts
